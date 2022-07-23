@@ -24,8 +24,26 @@ CODEGEN_PKG=${CODEGEN_PKG:-$(cd "${SCRIPT_ROOT}"; ls -d -1 ./vendor/k8s.io/code-
 
 function codegen::join() { local IFS="$1"; shift; echo "$*"; }
 
+PKG_NAME="github.com/alexzielenski/cel_polyfill"
 GROUPS_WITH_VERSIONS="celadmissionpolyfill.k8s.io:v1"
-APIS_PKG="github.com/alexzielenski/cel_polyfill/pkg/api"
+APIS_PKG="${PKG_NAME}/pkg/apis"
+OUTPUT_PKG="pkg/client"
+BOILERPLATE="${SCRIPT_ROOT}"/hack/boilerplate.go.txt
+
+chmod +x "${CODEGEN_PKG}"/generate-groups.sh
+
+# generate the code with:
+# --output-base    because this script should also be able to run inside the vendor dir of
+#                  k8s.io/kubernetes. The output-base is needed for the generators to output into the vendor dir
+#                  instead of the $GOPATH directly. For normal projects this can be dropped.
+"${CODEGEN_PKG}"/generate-groups.sh "informer,client,lister" \
+  github.com/alexzielenski/cel_polyfill/pkg/client $APIS_PKG \
+  $GROUPS_WITH_VERSIONS \
+  --go-header-file $BOILERPLATE \
+  --output-base ${SCRIPT_ROOT}/../../../
+
+# For some reason register-gen is not included in the above code generators?
+pushd $SCRIPT_ROOT >/dev/null
 
 # enumerate group versions
 FQ_APIS=() # e.g. k8s.io/api/apps/v1
@@ -34,27 +52,23 @@ for GVs in ${GROUPS_WITH_VERSIONS}; do
 
   # enumerate versions
   for V in ${Vs//,/ }; do
-    FQ_APIS+=("${APIS_PKG}/${G}/${V}")
+    FQ_APIS+=("./pkg/apis/${G}/${V}")
   done
 done
-echo $(codegen::join , "${FQ_APIS[@]}")
 
-chmod +x "${CODEGEN_PKG}"/generate-groups.sh
 
-# generate the code with:
-# --output-base    because this script should also be able to run inside the vendor dir of
-#                  k8s.io/kubernetes. The output-base is needed for the generators to output into the vendor dir
-#                  instead of the $GOPATH directly. For normal projects this can be dropped.
-"${CODEGEN_PKG}"/generate-groups.sh "deepcopy,client,lister,informer" \
-  github.com/alexzielenski/cel_polyfill/pkg/client $APIS_PKG \
-  $GROUPS_WITH_VERSIONS \
-  --go-header-file "${SCRIPT_ROOT}"/hack/boilerplate.go.txt \
-  --output-base ${SCRIPT_ROOT}/../../../
-
-# For some reason register-gen is not included in the above code generators?
 echo "Generating register files for ${GROUPS_WITH_VERSIONS}"
 go run k8s.io/code-generator/cmd/register-gen \
   --input-dirs $(codegen::join , "${FQ_APIS[@]}") \
   --output-file-base zz_generated.register \
-  --go-header-file "${SCRIPT_ROOT}"/hack/boilerplate.go.txt \
-  --output-base ${SCRIPT_ROOT}/../../../
+  --go-header-file $BOILERPLATE \
+  --output-base .
+
+echo "Generating deepcopy files for ${GROUPS_WITH_VERSIONS}"
+go run k8s.io/code-generator/cmd/deepcopy-gen \
+  --input-dirs $(codegen::join , "${FQ_APIS[@]}") \
+  --output-file-base zz_generated.deepcopy \
+  --go-header-file $BOILERPLATE \
+  --output-base .
+
+popd >/dev/null
