@@ -8,13 +8,13 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 type ValidationRuleSet struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	// +optional
-	Spec ValidationRuleSetSpec `json:"spec,omitempty" protobuf:"bytes,2,opt,name=spec"`
+	Spec ValidationRuleSetSpec `json:"spec,omitempty"`
 
 	// +optional
-	Status ValidationRuleSetStatus `json:"status,omitempty" protobuf:"bytes,3,opt,name=status"`
+	Status ValidationRuleSetStatus `json:"status,omitempty"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -27,12 +27,12 @@ type ValidationRuleSetList struct {
 
 type ValidationRuleSetSpec struct {
 	// Associative on Name
-	Rules []ValidationRule
+	Rules []ValidationRule `json:"rules"`
 }
 
 type ValidationRuleSetStatus struct {
 }
 
 type ValidationRule struct {
-	Name string
+	Name string `json:"name"`
 }

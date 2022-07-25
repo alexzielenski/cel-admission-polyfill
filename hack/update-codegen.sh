@@ -71,4 +71,11 @@ go run k8s.io/code-generator/cmd/deepcopy-gen \
   --go-header-file $BOILERPLATE \
   --output-base .
 
+# Generate CRD manifests for all types using controller-gen
+echo "Generating crd manifests for ${GROUPS_WITH_VERSIONS}"
+go run sigs.k8s.io/controller-tools/cmd/controller-gen \
+  crd \
+  paths=./pkg/apis/... \
+  output:dir=./crds
+
 popd >/dev/null

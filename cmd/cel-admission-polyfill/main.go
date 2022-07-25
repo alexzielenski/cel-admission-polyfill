@@ -6,11 +6,16 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"time"
 
+	"github.com/alexzielenski/cel_polyfill/pkg/client/clientset/versioned"
+	"github.com/alexzielenski/cel_polyfill/pkg/client/clientset/versioned/scheme"
+	"github.com/alexzielenski/cel_polyfill/pkg/client/informers/externalversions"
 	"github.com/alexzielenski/cel_polyfill/pkg/controller"
 	"github.com/alexzielenski/cel_polyfill/pkg/webhook"
-
+	apiextensionsclientsetscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
 	"k8s.io/client-go/kubernetes"
+	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -23,21 +28,36 @@ func main() {
 	// Create an overarching context which is cancelled if there is ever an
 	// OS interrupt (eg. Ctrl-C)
 	mainContext, _ := signal.NotifyContext(context.Background(), os.Interrupt)
+	restConfig, err := loadClientConfig()
 
-	kubeclient, err := loadClientSet()
 	if err != nil {
-		fmt.Printf("Failed to load Kubernetes Client Configuration: %v", err)
+		fmt.Printf("Failed to load Client Configuration: %v", err)
+		return
+	}
+
+	// TBH not sure the full extent of what this does
+	_ = scheme.AddToScheme(clientsetscheme.Scheme)
+	_ = apiextensionsclientsetscheme.AddToScheme(clientsetscheme.Scheme)
+
+	kubeClient, err := kubernetes.NewForConfig(restConfig)
+	customClient := versioned.New(kubeClient.Discovery().RESTClient())
+
+	if err != nil {
+		fmt.Printf("Failed to create kubernetes client: %v", err)
 		return
 	}
 
 	// used to keep process alive until all workers are finished
 	waitGroup := sync.WaitGroup{}
-	waitGroup.Add(2)
-
 	serverContext, serverCancel := context.WithCancel(mainContext)
-	controllerContext, controllerCancel := context.WithCancel(mainContext)
+
+	// Start any informers
+	// What is appropriate resync perriod?
+	customFactory := externalversions.NewSharedInformerFactory(customClient, 30*time.Second)
+	customFactory.Start(serverContext.Done())
 
 	// Start HTTP REST server for webhook
+	waitGroup.Add(1)
 	go func() {
 		webhook := webhook.New(locateCertificates())
 
@@ -45,7 +65,7 @@ func main() {
 		if DEBUG {
 			// When debugging, expect server to be running already. Treat
 			// as non-fatal error if it isn't.
-			if err := webhook.Install(kubeclient); err != nil {
+			if err := webhook.Install(kubeClient); err != nil {
 				fmt.Println(err)
 			} else {
 				// Install webhook configuration
@@ -56,19 +76,26 @@ func main() {
 		cancellationReason := webhook.Run(serverContext)
 		fmt.Printf("server closure reason: %v", cancellationReason)
 
-		controllerCancel()
+		// Cancel the server context to stop other workers
+		serverCancel()
 		waitGroup.Done()
 	}()
 
+	waitGroup.Add(1)
 	go func() {
 		// Start k8s operator for digesting validation configuration
-		admissionRulesController := controller.NewAdmissionRulesController(kubeclient)
+		admissionRulesController := controller.NewAdmissionRulesController(
+			kubeClient,
+			customFactory.Celadmissionpolyfill().V1().ValidationRuleSets(),
+		)
+
 		if DEBUG {
 			// Install CR Definiitons for our types
 			fmt.Println("updated CR definition")
+			admissionRulesController.Install()
 		}
 
-		cancellationReason := admissionRulesController.Run(controllerContext)
+		cancellationReason := admissionRulesController.Run(serverContext)
 		fmt.Printf("controller closure reason: %v", cancellationReason)
 
 		serverCancel()
@@ -80,11 +107,7 @@ func main() {
 	waitGroup.Wait()
 }
 
-func loadClientSet() (kubernetes.Interface, error) {
-	// To be honest have no idea how to do this
-	var config *rest.Config
-	var err error
-
+func loadClientConfig() (*rest.Config, error) {
 	// Use KubeConfig to find cluser if debugging, otherwise use the in cluser
 	// configuration
 	if DEBUG {
@@ -97,17 +120,11 @@ func loadClientSet() (kubernetes.Interface, error) {
 
 		kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
 
-		config, err = kubeConfig.ClientConfig()
-	} else {
-		// untested. assuming this is how it might work when run from inside clsuter
-		config, err = rest.InClusterConfig()
+		return kubeConfig.ClientConfig()
 	}
 
-	if err != nil {
-		return nil, err
-	}
-
-	return kubernetes.NewForConfig(config)
+	// untested. assuming this is how it might work when run from inside clsuter
+	return rest.InClusterConfig()
 }
 
 func locateCertificates() webhook.CertInfo {
