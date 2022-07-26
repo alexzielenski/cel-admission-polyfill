@@ -7,11 +7,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alexzielenski/cel_polyfill/pkg/client/clientset/versioned"
 	informers "github.com/alexzielenski/cel_polyfill/pkg/client/informers/externalversions/celadmissionpolyfill.k8s.io/v1"
+	listers "github.com/alexzielenski/cel_polyfill/pkg/client/listers/celadmissionpolyfill.k8s.io/v1"
+	"github.com/alexzielenski/cel_polyfill/pkg/validator"
 	apiextensions "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -34,38 +37,52 @@ type Controller interface {
 	Install() error
 }
 
-func NewAdmissionRulesController(client kubernetes.Interface, ruleSetsInformer informers.ValidationRuleSetInformer) Controller {
+func NewAdmissionRulesController(
+	client kubernetes.Interface,
+	apiextensionsClient apiextensionsclientset.Interface,
+	ruleSetsInformer informers.ValidationRuleSetInformer,
+	validator validator.Interface,
+) Controller {
 	name := "admissionRulesController"
 	result := &admissionRulesController{
-		name:             name,
-		client:           client,
-		customClient:     versioned.New(client.Discovery().RESTClient()),
-		queue:            workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), name),
-		ruleSetsInformer: ruleSetsInformer,
+		name:                name,
+		client:              client,
+		apiextensionsClient: apiextensionsClient,
+		queue:               workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), name),
+		informer:            ruleSetsInformer.Informer(),
+		lister:              ruleSetsInformer.Lister(),
+		validator:           validator,
 	}
 
 	return result
 }
 
 type admissionRulesController struct {
-	name         string
-	client       kubernetes.Interface
-	customClient versioned.Interface
-	queue        workqueue.RateLimitingInterface
+	name                string
+	client              kubernetes.Interface
+	apiextensionsClient apiextensionsclientset.Interface
 
-	ruleSetsInformer informers.ValidationRuleSetInformer
+	queue     workqueue.RateLimitingInterface
+	validator validator.Interface
+
+	informer cache.SharedIndexInformer
+	lister   listers.ValidationRuleSetLister
 }
 
 func (c *admissionRulesController) Install() error {
 	//!TODO: install CRDs for our thingy
 	client := apiextensionsclient.New(c.client.Discovery().RESTClient())
-	client.ApiextensionsV1().CustomResourceDefinitions().Update(context.Background(), &apiextensions.CustomResourceDefinition{}, metav1.UpdateOptions{})
+	client.ApiextensionsV1().CustomResourceDefinitions().Update(
+		context.Background(),
+		&apiextensions.CustomResourceDefinition{},
+		metav1.UpdateOptions{},
+	)
 	return nil
 }
 
 func (c *admissionRulesController) Run(ctx context.Context) error {
-	fmt.Println("starting admission rules controller")
-	defer fmt.Println("stopping admission rules controller")
+	klog.Info("starting admission rules controller")
+	defer klog.Info("stopping admission rules controller")
 
 	// Start informer for admission rules
 	// c.client.
@@ -83,7 +100,7 @@ func (c *admissionRulesController) Run(ctx context.Context) error {
 	//TODO: Remove this event handler when we are finished with the informer
 	// support removal of event handlers from SharedIndexInformers
 	// PR: https://github.com/kubernetes/kubernetes/pull/111122
-	c.ruleSetsInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	c.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			enqueue(obj)
 		},
@@ -114,7 +131,7 @@ func (c *admissionRulesController) Run(ctx context.Context) error {
 
 	//!TODO: check if informer is even valid?
 	// e.g. if crd isnt even installed yet this just waits forever here
-	if !cache.WaitForNamedCacheSync(c.name, ctx.Done(), c.ruleSetsInformer.Informer().HasSynced) {
+	if !cache.WaitForNamedCacheSync(c.name, ctx.Done(), c.informer.HasSynced) {
 		// ctx cancelled during cache sync. return early
 		err := ctx.Err()
 		if err == nil {
@@ -127,12 +144,15 @@ func (c *admissionRulesController) Run(ctx context.Context) error {
 	workers := 2
 	waitGroup := sync.WaitGroup{}
 	waitGroup.Add(workers)
+
 	for i := 0; i < workers; i++ {
 		go func() {
 			wait.Until(c.runWorker, time.Second, ctx.Done())
 			waitGroup.Done()
 		}()
 	}
+
+	klog.Infof("Started %v workers for %v", workers, c.name)
 
 	// Wait for context cancel.
 	<-ctx.Done()
@@ -206,12 +226,11 @@ func (c *admissionRulesController) reconcile(key string) error {
 		return nil
 	}
 
-	ruleSet, err := c.ruleSetsInformer.Lister().ValidationRuleSets(namespace).Get(name)
+	ruleSet, err := c.lister.ValidationRuleSets(namespace).Get(name)
 	if err != nil {
-		// The ruleSet resource may no longer exist, in which case we stop
-		// processing.
 		if kerrors.IsNotFound(err) {
-			utilruntime.HandleError(fmt.Errorf("foo '%s' in work queue no longer exists", key))
+			// Rule was deleted. Remove it from our database of enforced rules
+			c.validator.RemoveRuleSet(namespace, name)
 			return nil
 		}
 
@@ -220,6 +239,6 @@ func (c *admissionRulesController) reconcile(key string) error {
 
 	// Commit the ruleSet to our local data structure for enforcing validation
 	// rules
-	_ = ruleSet
+	c.validator.AddRuleSet(ruleSet)
 	return nil
 }

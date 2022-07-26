@@ -1,6 +1,9 @@
 package v1
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
 
 // +genclient
 // +geninformer
@@ -26,13 +29,21 @@ type ValidationRuleSetList struct {
 }
 
 type ValidationRuleSetSpec struct {
-	// Associative on Name
+
+	// +listType=map
+	// +listMapKey=name
 	Rules []ValidationRule `json:"rules"`
+
+	// +listType=atomic
+	Match []admissionregistrationv1.RuleWithOperations `json:"match"`
 }
 
 type ValidationRuleSetStatus struct {
+	//!TODO: surface errors/status for each rule
 }
 
 type ValidationRule struct {
-	Name string `json:"name"`
+	Name    string `json:"name"`
+	Rule    string `json:"rule"`
+	Message string `json:"message"`
 }

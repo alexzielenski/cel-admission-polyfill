@@ -12,12 +12,17 @@ import (
 	"github.com/alexzielenski/cel_polyfill/pkg/client/clientset/versioned/scheme"
 	"github.com/alexzielenski/cel_polyfill/pkg/client/informers/externalversions"
 	"github.com/alexzielenski/cel_polyfill/pkg/controller"
+	"github.com/alexzielenski/cel_polyfill/pkg/validator"
 	"github.com/alexzielenski/cel_polyfill/pkg/webhook"
+	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apiextensionsclientsetscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
+	apiextensionsinformers "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
 	"k8s.io/client-go/kubernetes"
 	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog/v2"
 )
 
 // Global K8s webhook which respects policy rules
@@ -40,12 +45,32 @@ func main() {
 	_ = apiextensionsclientsetscheme.AddToScheme(clientsetscheme.Scheme)
 
 	kubeClient, err := kubernetes.NewForConfig(restConfig)
-	customClient := versioned.New(kubeClient.Discovery().RESTClient())
-
+	// customClient := versioned.New(kubeClient.Discovery().RESTClient())
 	if err != nil {
 		fmt.Printf("Failed to create kubernetes client: %v", err)
 		return
 	}
+
+	customClient, err := versioned.NewForConfig(restConfig)
+	if err != nil {
+		klog.Errorf("Failed to create crd client: %v", err)
+		return
+	}
+
+	apiextensionsClient, err := apiextensionsclientset.NewForConfig(restConfig)
+	if err != nil {
+		klog.Errorf("Failed to create apiextensions client: %v", err)
+		return
+	}
+
+	// Create RESTMapper
+	//!TODO: Get updates
+	discoveryDocument, err := restmapper.GetAPIGroupResources(kubeClient.DiscoveryClient)
+	if err != nil {
+		klog.Error(err)
+		return
+	}
+	mapper := restmapper.NewDiscoveryRESTMapper(discoveryDocument)
 
 	// used to keep process alive until all workers are finished
 	waitGroup := sync.WaitGroup{}
@@ -54,27 +79,28 @@ func main() {
 	// Start any informers
 	// What is appropriate resync perriod?
 	customFactory := externalversions.NewSharedInformerFactory(customClient, 30*time.Second)
-	customFactory.Start(serverContext.Done())
+	apiextensionsFactory := apiextensionsinformers.NewSharedInformerFactory(apiextensionsClient, 30*time.Second)
+	validator := validator.New(apiextensionsFactory.Apiextensions().V1().CustomResourceDefinitions().Lister(), mapper)
 
 	// Start HTTP REST server for webhook
 	waitGroup.Add(1)
 	go func() {
-		webhook := webhook.New(locateCertificates())
+		webhook := webhook.New(locateCertificates(), validator)
 
 		// Set up bindings with cluster automatically if debugging
 		if DEBUG {
 			// When debugging, expect server to be running already. Treat
 			// as non-fatal error if it isn't.
 			if err := webhook.Install(kubeClient); err != nil {
-				fmt.Println(err)
+				klog.Error(err)
 			} else {
 				// Install webhook configuration
-				fmt.Println("updated webhook configuration")
+				klog.Info("updated webhook configuration")
 			}
 		}
 
 		cancellationReason := webhook.Run(serverContext)
-		fmt.Printf("server closure reason: %v", cancellationReason)
+		klog.Infof("server closure reason: %v", cancellationReason)
 
 		// Cancel the server context to stop other workers
 		serverCancel()
@@ -82,25 +108,35 @@ func main() {
 	}()
 
 	waitGroup.Add(1)
+
+	// call outside of goroutine so that informer is requested before we start
+	// factory. (for some reason factory doesn't start informers requested
+	// after it was already started?)
+	admissionRulesController := controller.NewAdmissionRulesController(
+		kubeClient,
+		apiextensionsClient,
+		customFactory.Celadmissionpolyfill().V1().ValidationRuleSets(),
+		validator,
+	)
 	go func() {
 		// Start k8s operator for digesting validation configuration
-		admissionRulesController := controller.NewAdmissionRulesController(
-			kubeClient,
-			customFactory.Celadmissionpolyfill().V1().ValidationRuleSets(),
-		)
 
 		if DEBUG {
 			// Install CR Definiitons for our types
-			fmt.Println("updated CR definition")
+			klog.Info("updated CR definition")
 			admissionRulesController.Install()
 		}
 
 		cancellationReason := admissionRulesController.Run(serverContext)
-		fmt.Printf("controller closure reason: %v", cancellationReason)
+		klog.Infof("controller closure reason: %v", cancellationReason)
 
 		serverCancel()
 		waitGroup.Done()
 	}()
+
+	// Start after informers have been requested from factory
+	apiextensionsFactory.Start(serverContext.Done())
+	customFactory.Start(serverContext.Done())
 
 	// Wait for controller and HTTP server to stop. They both signal to the other's
 	// context that it is time to wrap up

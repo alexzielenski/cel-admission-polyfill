@@ -12,8 +12,12 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	admissionregistrationv1apply "k8s.io/client-go/applyconfigurations/admissionregistration/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/klog/v2"
 )
 
 type CertInfo struct {
@@ -35,16 +39,25 @@ type Interface interface {
 	Run(ctx context.Context) error
 }
 
-func New(certs CertInfo) Interface {
+type Validator interface {
+	// Validates the object and returns nil if it succeeds
+	// or an error explaining why the object fails validation
+	// Thread-Safe
+	Validate(oldObj, obj runtime.Object) error
+}
+
+func New(certs CertInfo, validator Validator) Interface {
 	return &webhook{
-		CertInfo: certs,
-		port:     9091,
+		CertInfo:  certs,
+		port:      9091,
+		validator: validator,
 	}
 }
 
 type webhook struct {
-	client kubernetes.Interface
-	port   uint16
+	client    kubernetes.Interface
+	port      uint16
+	validator Validator
 	CertInfo
 }
 
@@ -80,7 +93,9 @@ func (wh *webhook) Install(client kubernetes.Interface) error {
 								WithURL("https://127.0.0.1:"+strconv.Itoa(int(wh.port))+"/validate").
 								WithCABundle(rootCert...)).
 						WithSideEffects(
-							admissionregistrationv1.SideEffectClassNone),
+							admissionregistrationv1.SideEffectClassNone).
+						//!TODO: gate for debugging
+						WithFailurePolicy(admissionregistrationv1.Ignore),
 				),
 			metav1.ApplyOptions{
 				FieldManager: "cel_polyfill_debug",
@@ -126,7 +141,7 @@ func (wh *webhook) Run(ctx context.Context) error {
 	if err := srv.Close(); err != nil {
 		// Errors with gracefully shutting down connections. Not fatal. Server
 		// is still closed.
-		fmt.Println(err)
+		klog.Error(err)
 	}
 
 	// Prefer the passed context's error to pick up deadline/cancelled errors
@@ -144,8 +159,54 @@ func (wh *webhook) handleHealth(w http.ResponseWriter, req *http.Request) {
 }
 
 func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Request) {
-	fmt.Println("validate hit")
-	w.WriteHeader(500)
+	parsed, err := parseRequest(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	klog.Info("admission review requested")
+
+	var object unstructured.Unstructured
+	var oldObject unstructured.Unstructured
+
+	err = json.Unmarshal(parsed.Request.OldObject.Raw, &oldObject)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	err = json.Unmarshal(parsed.Request.Object.Raw, &object)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	err = wh.validator.Validate(&oldObject, &object)
+	allowed := err == nil || err.Error() != "validation failed"
+	errString := "valid"
+	if err != nil {
+		errString = err.Error()
+	}
+
+	var status int32 = http.StatusAccepted
+	if !allowed {
+		status = http.StatusForbidden
+	}
+	response := reviewResponse(
+		parsed.Request.UID,
+		allowed,
+		status,
+		errString,
+	)
+
+	out, err := json.Marshal(response)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(out)
 }
 
 func (wh *webhook) handleWebhookMutate(w http.ResponseWriter, req *http.Request) {
@@ -153,8 +214,26 @@ func (wh *webhook) handleWebhookMutate(w http.ResponseWriter, req *http.Request)
 	w.WriteHeader(500)
 }
 
+func reviewResponse(uid types.UID, allowed bool, httpCode int32,
+	reason string) *admissionv1.AdmissionReview {
+	return &admissionv1.AdmissionReview{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "AdmissionReview",
+			APIVersion: "admission.k8s.io/v1",
+		},
+		Response: &admissionv1.AdmissionResponse{
+			UID:     uid,
+			Allowed: allowed,
+			Result: &metav1.Status{
+				Code:    httpCode,
+				Message: reason,
+			},
+		},
+	}
+}
+
 // parseRequest extracts an AdmissionReview from an http.Request if possible
-func parseRequest(r http.Request) (*admissionv1.AdmissionReview, error) {
+func parseRequest(r *http.Request) (*admissionv1.AdmissionReview, error) {
 	if r.Header.Get("Content-Type") != "application/json" {
 		return nil, fmt.Errorf("Content-Type: %q should be %q",
 			r.Header.Get("Content-Type"), "application/json")
