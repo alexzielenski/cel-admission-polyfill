@@ -2,7 +2,9 @@
 apiVersion: stable.example.com/v1
 kind: BasicUnion
 metadata:
-  name: testbasicunion
+  name: notatest
 spec:
-  value: hello
+  value: world
   mode1: world
+  discriminator: mode1
+
