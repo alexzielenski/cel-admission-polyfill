@@ -21,6 +21,7 @@ import (
 	runtimeschema "k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/klog/v2"
 )
 
 type Interface interface {
@@ -66,28 +67,39 @@ func isWildcard(s []string) bool {
 	return len(s) == 1 && s[0] == "*"
 }
 
-func (r ruleSetCacheEntry) Matches(obj runtime.Object) bool {
+func hasMatch(within []string, search string) bool {
+	for _, q := range within {
+		if q == search {
+			return true
+		}
+	}
+	return false
+}
+
+func (r ruleSetCacheEntry) Matches(gvr schema.GroupVersionResource) bool {
 	if len(r.source.Spec.Match) == 0 {
 		return false
 	}
 
 	for _, match := range r.source.Spec.Match {
-		if !isWildcard(match.APIGroups) {
+		if !isWildcard(match.APIGroups) && !hasMatch(match.APIGroups, gvr.Group) {
 			return false
 		}
 
-		if !isWildcard(match.APIVersions) {
+		if !isWildcard(match.APIVersions) && !hasMatch(match.APIVersions, gvr.Version) {
 			return false
 		}
 
-		if !isWildcard(match.Resources) {
+		if !isWildcard(match.Resources) && !hasMatch(match.Resources, gvr.Resource) {
 			return false
 		}
 
+		//!TODO: support non-wildcard
 		if len(match.Operations) != 1 || match.Operations[0] != admissionregistrationv1.OperationAll {
 			return false
 		}
 
+		//!TODO: support non-wildcard
 		if match.Scope == nil || *match.Scope != "*" {
 			return false
 		}
@@ -181,6 +193,16 @@ func (v *validator) Validate(oldObj, obj runtime.Object) error {
 	var failures field.ErrorList
 	gvk := obj.GetObjectKind().GroupVersionKind()
 
+	//!TODO: not this. the admissionreview has access to the requested resource
+	// already. also we are unsure if that is an appropriate thing to filter by?
+	gvr, err := v.restMapper.RESTMapping(runtimeschema.GroupKind{
+		Group: gvk.Group,
+		Kind:  gvk.Kind,
+	}, gvk.Version)
+
+	if err != nil {
+		return err
+	}
 	//!TODO: expensive to compute. change to computing lazily only if there
 	// ended up being a match for this gvk among the registered rules
 	structural, err := v.getStructuralSchema(gvk)
@@ -193,7 +215,7 @@ func (v *validator) Validate(oldObj, obj runtime.Object) error {
 
 	var celBudget int64 = cel.RuntimeCELCostBudget
 	for _, entry := range v.registeredRuleSets {
-		if entry.Matches(obj) {
+		if entry.Matches(gvr.Resource) {
 			compiled, exists := entry.compiledRules[gvk]
 			if !exists {
 				// Compile the rules
@@ -221,10 +243,11 @@ func (v *validator) Validate(oldObj, obj runtime.Object) error {
 
 					if newS.Properties != nil {
 						newProperties := map[string]apiserverschema.Structural{}
+						newS.Properties = newProperties
+
 						for prop, schema := range s.Properties {
 							newS.Properties[prop] = *wipeOutXValidations(&schema)
 						}
-						s.Properties = newProperties
 					}
 
 					return &newS
@@ -243,11 +266,11 @@ func (v *validator) Validate(oldObj, obj runtime.Object) error {
 				//!TODO: allow different locations that choose field paths to
 				// apply stuff to?
 				copied.XValidations = xvalidations
-				entry.compiledRules[gvk] = compileRule{
+				compiled = compileRule{
 					validator:  cel.NewValidator(copied, cel.PerCallLimit),
 					structural: copied,
 				}
-
+				entry.compiledRules[gvk] = compiled
 			}
 			var errorList field.ErrorList
 
@@ -278,6 +301,9 @@ func (v *validator) Validate(oldObj, obj runtime.Object) error {
 	}
 
 	if failures != nil {
+		for _, e := range failures {
+			klog.Error(e)
+		}
 		return errors.New("validation failed")
 	}
 

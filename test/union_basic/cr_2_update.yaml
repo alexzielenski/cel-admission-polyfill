@@ -1,0 +1,12 @@
+# Should fail
+---
+apiVersion: stable.example.com/v1
+kind: BasicUnion
+metadata:
+  name: testbasicunion
+spec:
+  value: hello
+  mode1: ""
+  mode2: hello
+  discriminator: mode2
+

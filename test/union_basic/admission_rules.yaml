@@ -1,0 +1,26 @@
+---
+apiVersion: celadmissionpolyfill.k8s.io/v1
+kind: ValidationRuleSet
+metadata:
+  creationTimestamp: null
+  name: testrules
+spec:
+  match:
+    - apiGroups: ["stable.example.com"]
+      apiVersions: ["*"]
+      operations: ["*"]
+      scope: "*"
+      resources: ["basicunions"]
+  rules:
+    - name: testrule
+      message: "name should be a test"
+      rule: "self.metadata.name.startsWith('test')"
+    - name: enum_rule
+      message: "discriminator is either 'mode1' or 'mode2'"
+      rule: "self.spec.discriminator == 'mode1' || self.spec.discriminator == 'mode2'"
+    - name: value_rule1
+      message: "if discriminator is mode2, mode2 and value must be equal"
+      rule: "self.spec.discriminator == 'mode1' || self.spec.mode2 == self.spec.value"
+    - name: value_rule2
+      message: "if discriminator is mode1, mode1 and value must be equal"
+      rule: "self.spec.discriminator == 'mode2' || self.spec.mode1 == self.spec.value"
