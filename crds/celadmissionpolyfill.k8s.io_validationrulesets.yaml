@@ -4,7 +4,6 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.9.2
-    "api-approved.kubernetes.io": "https://github.com/kubernetes/kubernetes/pull/78458"
   creationTimestamp: null
   name: validationrulesets.celadmissionpolyfill.k8s.io
 spec:
@@ -16,7 +15,7 @@ spec:
     singular: validationruleset
   scope: Namespaced
   versions:
-  - name: v1
+  - name: v1alpha1
     schema:
       openAPIV3Schema:
         properties:

@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alexzielenski/cel_polyfill/pkg/client/clientset/versioned"
-	"github.com/alexzielenski/cel_polyfill/pkg/client/clientset/versioned/scheme"
-	"github.com/alexzielenski/cel_polyfill/pkg/client/informers/externalversions"
 	"github.com/alexzielenski/cel_polyfill/pkg/controller"
+	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned"
+	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/scheme"
+	"github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions"
 	"github.com/alexzielenski/cel_polyfill/pkg/validator"
 	"github.com/alexzielenski/cel_polyfill/pkg/webhook"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"

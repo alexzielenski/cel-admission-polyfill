@@ -25,9 +25,11 @@ CODEGEN_PKG=${CODEGEN_PKG:-$(cd "${SCRIPT_ROOT}"; ls -d -1 ./vendor/k8s.io/code-
 function codegen::join() { local IFS="$1"; shift; echo "$*"; }
 
 PKG_NAME="github.com/alexzielenski/cel_polyfill"
-GROUPS_WITH_VERSIONS="celadmissionpolyfill.k8s.io:v1"
+
+GROUPS_WITH_VERSIONS="celadmissionpolyfill.k8s.io:v1alpha1,v1alpha2"
+
 APIS_PKG="${PKG_NAME}/pkg/apis"
-OUTPUT_PKG="pkg/client"
+OUTPUT_PKG="pkg/generated"
 BOILERPLATE="${SCRIPT_ROOT}"/hack/boilerplate.go.txt
 
 chmod +x "${CODEGEN_PKG}"/generate-groups.sh
@@ -37,8 +39,8 @@ chmod +x "${CODEGEN_PKG}"/generate-groups.sh
 #                  k8s.io/kubernetes. The output-base is needed for the generators to output into the vendor dir
 #                  instead of the $GOPATH directly. For normal projects this can be dropped.
 "${CODEGEN_PKG}"/generate-groups.sh "informer,client,lister" \
-  github.com/alexzielenski/cel_polyfill/pkg/client $APIS_PKG \
-  $GROUPS_WITH_VERSIONS \
+  ${PKG_NAME}/${OUTPUT_PKG} $APIS_PKG \
+  "$GROUPS_WITH_VERSIONS" \
   --go-header-file $BOILERPLATE \
   --output-base ${SCRIPT_ROOT}/../../../
 

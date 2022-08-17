@@ -1,0 +1,121 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.9.2
+  creationTimestamp: null
+  name: policytemplates.celadmissionpolyfill.k8s.io
+spec:
+  group: celadmissionpolyfill.k8s.io
+  names:
+    kind: PolicyTemplate
+    listKind: PolicyTemplateList
+    plural: policytemplates
+    singular: policytemplate
+  scope: Namespaced
+  versions:
+  - name: v1alpha2
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          evaluator:
+            properties:
+              environment:
+                type: string
+              productions:
+                items:
+                  properties:
+                    decision:
+                      type: string
+                    decisionRef:
+                      type: string
+                    decisions:
+                      items:
+                        properties:
+                          decision:
+                            type: string
+                          decisionRef:
+                            type: string
+                          output:
+                            type: object
+                        type: object
+                      type: array
+                    match:
+                      type: string
+                    output:
+                      type: object
+                  required:
+                  - decisions
+                  - match
+                  type: object
+                type: array
+              ranges:
+                items:
+                  properties:
+                    in:
+                      type: string
+                    index:
+                      type: string
+                    key:
+                      type: string
+                    value:
+                      type: string
+                  type: object
+                type: array
+              terms:
+                additionalProperties:
+                  type: string
+                type: object
+            type: object
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          schema:
+            description: Copy-pasted from upstream cel-policy-template. Needed to
+              add JSON tags to use with CRD generator.
+            properties:
+              $ref:
+                type: string
+              additionalProperties: {}
+              default:
+                type: object
+              description:
+                type: string
+              enum:
+                items:
+                  type: object
+                type: array
+              format:
+                type: string
+              items: {}
+              metadata:
+                additionalProperties:
+                  type: string
+                type: object
+              properties:
+                additionalProperties: {}
+                type: object
+              required:
+                items:
+                  type: string
+                type: array
+              title:
+                type: string
+              type:
+                type: string
+              type_param:
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
