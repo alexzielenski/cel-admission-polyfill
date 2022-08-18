@@ -1,5 +1,3 @@
-# Should fail
----
 apiVersion: stable.example.com/v1
 kind: BasicUnion
 metadata:

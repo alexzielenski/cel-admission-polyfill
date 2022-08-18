@@ -43,7 +43,7 @@ type Validator interface {
 	// Validates the object and returns nil if it succeeds
 	// or an error explaining why the object fails validation
 	// Thread-Safe
-	Validate(oldObj, obj runtime.Object) error
+	Validate(gvr metav1.GroupVersionResource, oldObj, obj runtime.Object) error
 }
 
 func New(certs CertInfo, validator Validator) Interface {
@@ -181,7 +181,7 @@ func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	err = wh.validator.Validate(&oldObject, &object)
+	err = wh.validator.Validate(parsed.Request.Resource, &oldObject, &object)
 	allowed := err == nil || err.Error() != "validation failed"
 	errString := "valid"
 	if err != nil {

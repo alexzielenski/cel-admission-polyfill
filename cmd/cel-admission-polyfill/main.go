@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alexzielenski/cel_polyfill/pkg/controller"
+	controllerv1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/controller/v1alpha1"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/scheme"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions"
@@ -20,7 +20,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 )
@@ -63,15 +62,6 @@ func main() {
 		return
 	}
 
-	// Create RESTMapper
-	//!TODO: Get updates
-	discoveryDocument, err := restmapper.GetAPIGroupResources(kubeClient.DiscoveryClient)
-	if err != nil {
-		klog.Error(err)
-		return
-	}
-	mapper := restmapper.NewDiscoveryRESTMapper(discoveryDocument)
-
 	// used to keep process alive until all workers are finished
 	waitGroup := sync.WaitGroup{}
 	serverContext, serverCancel := context.WithCancel(mainContext)
@@ -80,7 +70,7 @@ func main() {
 	// What is appropriate resync perriod?
 	customFactory := externalversions.NewSharedInformerFactory(customClient, 30*time.Second)
 	apiextensionsFactory := apiextensionsinformers.NewSharedInformerFactory(apiextensionsClient, 30*time.Second)
-	validator := validator.New(apiextensionsFactory.Apiextensions().V1().CustomResourceDefinitions().Lister(), mapper)
+	validator := validator.New(apiextensionsFactory.Apiextensions().V1().CustomResourceDefinitions().Lister())
 
 	// Start HTTP REST server for webhook
 	waitGroup.Add(1)
@@ -112,10 +102,8 @@ func main() {
 	// call outside of goroutine so that informer is requested before we start
 	// factory. (for some reason factory doesn't start informers requested
 	// after it was already started?)
-	admissionRulesController := controller.NewAdmissionRulesController(
-		kubeClient,
-		apiextensionsClient,
-		customFactory.Celadmissionpolyfill().V1().ValidationRuleSets(),
+	admissionRulesController := controllerv1alpha1.NewAdmissionRulesController(
+		customFactory.Celadmissionpolyfill().V1alpha1().ValidationRuleSets(),
 		validator,
 	)
 	go func() {
@@ -124,7 +112,7 @@ func main() {
 		if DEBUG {
 			// Install CR Definiitons for our types
 			klog.Info("updated CR definition")
-			admissionRulesController.Install()
+			// admissionRulesController.Install()
 		}
 
 		cancellationReason := admissionRulesController.Run(serverContext)

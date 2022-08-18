@@ -2,7 +2,7 @@
 
 // +groupName=stable.example.com
 // +versionName=v1
-package union_basic
+package testdata
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

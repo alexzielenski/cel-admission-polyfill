@@ -9,7 +9,6 @@ import (
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 
@@ -19,46 +18,13 @@ import (
 	"k8s.io/klog/v2"
 )
 
-type Controller[T runtime.Object] interface {
-	// Meant to be run inside a goroutine
-	// Waits for and reacts to changes in whatever type the controller
-	// is concerned with.
-	//
-	// Returns an error always non-nil explaining why the worker stopped
-	Run(ctx context.Context) error
-}
-
-type Informer[T runtime.Object] interface {
-	Informer() cache.SharedIndexInformer
-	Lister() Lister[T]
-}
-
-// TLister helps list Ts.
-// All objects returned here must be treated as read-only.
-type Lister[T runtime.Object] interface {
-	// List lists all ValidationRuleSets in the indexer for a given namespace.
-	// Objects returned here must be treated as read-only.
-	List(namespace string, selector labels.Selector) (ret []*T, err error)
-
-	// Get retrieves the ValidationRuleSet from the indexer for a given namespace and name.
-	// Objects returned here must be treated as read-only.
-	Get(namespace string, name string) (*T, error)
-}
-
-type NamespacedLister[T runtime.Object] interface {
-	// List lists all ValidationRuleSets in the indexer for a given namespace.
-	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*T, err error)
-	// Get retrieves the ValidationRuleSet from the indexer for a given namespace and name.
-	// Objects returned here must be treated as read-only.
-	Get(name string) (*T, error)
-}
+var _ Interface = &controller[runtime.Object]{}
 
 type controller[T runtime.Object] struct {
 	lister     Lister[T]
 	informer   cache.SharedIndexInformer
 	queue      workqueue.RateLimitingInterface
-	reconciler func(newObj *T) error
+	reconciler func(namespace, name string, newObj T) error
 
 	options ControllerOptions
 }
@@ -68,17 +34,17 @@ type ControllerOptions struct {
 	Workers uint
 }
 
-func NewController[T runtime.Object](
+func New[T runtime.Object](
 	informer Informer[T],
-	reconciler func(newObj *T) error,
+	reconciler func(namepace, name string, newObj T) error,
 	options ControllerOptions,
-) Controller[T] {
+) Interface {
 	if options.Workers == 0 {
 		options.Workers = 2
 	}
 
 	if len(options.Name) == 0 {
-		options.Name = fmt.Sprintf("%T-controller", *new(*T))
+		options.Name = fmt.Sprintf("%T-controller", new(T))
 	}
 
 	return &controller[T]{
@@ -86,6 +52,7 @@ func NewController[T runtime.Object](
 		lister:     informer.Lister(),
 		informer:   informer.Informer(),
 		reconciler: reconciler,
+		queue:      workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), options.Name),
 	}
 }
 
@@ -224,7 +191,7 @@ func (c *controller[T]) runWorker() {
 }
 
 func (c *controller[T]) reconcile(key string) error {
-	var newObj *T
+	var newObj T
 	var err error
 
 	// Convert the namespace/name string into a distinct namespace and name
@@ -236,13 +203,12 @@ func (c *controller[T]) reconcile(key string) error {
 
 	newObj, err = c.lister.Get(namespace, name)
 	if err != nil {
-		if kerrors.IsNotFound(err) {
-			// Rule was deleted. Remove it from our database of enforced rules
-			newObj = nil
-		} else {
+		if !kerrors.IsNotFound(err) {
 			return err
 		}
+
+		// Rule was deleted. Remove it from our database of enforced rules
 	}
 
-	return c.reconciler(newObj)
+	return c.reconciler(namespace, name, newObj)
 }

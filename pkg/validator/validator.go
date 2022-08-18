@@ -15,10 +15,8 @@ import (
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/cel"
 	structuraldefaulting "k8s.io/apiextensions-apiserver/pkg/apiserver/schema/defaulting"
 	apiextensionsv1listers "k8s.io/apiextensions-apiserver/pkg/client/listers/apiextensions/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	runtimeschema "k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/klog/v2"
@@ -28,7 +26,7 @@ type Interface interface {
 	// Validates the object and returns nil if it succeeds
 	// or an error explaining why the object fails validation
 	// Thread-Safe
-	Validate(oldObj, obj runtime.Object) error
+	Validate(gvr metav1.GroupVersionResource, oldObj, obj interface{}) error
 
 	// Adds a Ruleset to be enforced by the Validate function.
 	// If there is an existing ruleset with the same namespace/name, if is
@@ -44,13 +42,12 @@ type Interface interface {
 }
 
 type validator struct {
-	crdLister  apiextensionsv1listers.CustomResourceDefinitionLister
-	restMapper meta.RESTMapper
+	crdLister apiextensionsv1listers.CustomResourceDefinitionLister
 
 	//!TODO: refactor Validate and change to RWMutex
 	lock               sync.Mutex
 	registeredRuleSets map[string]ruleSetCacheEntry
-	structuralSchemas  map[runtimeschema.GroupVersionKind]*apiserverschema.Structural
+	structuralSchemas  map[metav1.GroupVersionResource]*apiserverschema.Structural
 }
 
 type compileRule struct {
@@ -60,7 +57,7 @@ type compileRule struct {
 
 type ruleSetCacheEntry struct {
 	source        *polyfillv1.ValidationRuleSet
-	compiledRules map[runtimeschema.GroupVersionKind]compileRule
+	compiledRules map[metav1.GroupVersionResource]compileRule
 }
 
 func isWildcard(s []string) bool {
@@ -76,7 +73,7 @@ func hasMatch(within []string, search string) bool {
 	return false
 }
 
-func (r ruleSetCacheEntry) Matches(gvr schema.GroupVersionResource) bool {
+func (r ruleSetCacheEntry) Matches(gvr metav1.GroupVersionResource) bool {
 	if len(r.source.Spec.Match) == 0 {
 		return false
 	}
@@ -109,29 +106,23 @@ func (r ruleSetCacheEntry) Matches(gvr schema.GroupVersionResource) bool {
 
 func New(
 	crdLister apiextensionsv1listers.CustomResourceDefinitionLister,
-	restMapper meta.RESTMapper,
 ) Interface {
 	return &validator{
 		crdLister:          crdLister,
-		restMapper:         restMapper,
-		structuralSchemas:  make(map[runtimeschema.GroupVersionKind]*apiserverschema.Structural),
+		structuralSchemas:  make(map[metav1.GroupVersionResource]*apiserverschema.Structural),
 		registeredRuleSets: make(map[string]ruleSetCacheEntry),
 	}
 }
 
-func (val *validator) getStructuralSchema(gvk schema.GroupVersionKind) (*apiserverschema.Structural, error) {
-	// how to get canonical GVK for GVK?
-
-	if existing, exists := val.structuralSchemas[gvk]; exists {
+func (val *validator) getStructuralSchema(gvr metav1.GroupVersionResource) (*apiserverschema.Structural, error) {
+	//!TODO: does not take into account CRD updates after things have been cached
+	// should save RV of cached structurals. if does not match most recent should
+	// re-create
+	if existing, exists := val.structuralSchemas[gvr]; exists {
 		return existing, nil
 	}
 
-	rsrc, err := val.restMapper.RESTMapping(runtimeschema.GroupKind{
-		Group: gvk.Group,
-		Kind:  gvk.Kind,
-	}, gvk.Version)
-
-	name := rsrc.Resource.Resource + "." + rsrc.Resource.Group
+	name := gvr.Resource + "." + gvr.Group
 
 	crd, err := val.crdLister.Get(name)
 	if err != nil {
@@ -153,13 +144,13 @@ func (val *validator) getStructuralSchema(gvk schema.GroupVersionKind) (*apiserv
 			return nil, fmt.Errorf("failed converting CRD validation to internal version: %v", err)
 		}
 		s, err := apiserverschema.NewStructural(internalValidation.OpenAPIV3Schema)
-		if crd.Spec.PreserveUnknownFields == false && err != nil {
+		if !crd.Spec.PreserveUnknownFields && err != nil {
 			// This should never happen. If it does, it is a programming error.
 			utilruntime.HandleError(fmt.Errorf("failed to convert schema to structural: %v", err))
 			return nil, fmt.Errorf("the server could not properly serve the CR schema") // validation should avoid this
 		}
 
-		if crd.Spec.PreserveUnknownFields == false {
+		if !crd.Spec.PreserveUnknownFields {
 			// we don't own s completely, e.g. defaults are not deep-copied. So better make a copy here.
 			s = s.DeepCopy()
 
@@ -170,42 +161,31 @@ func (val *validator) getStructuralSchema(gvk schema.GroupVersionKind) (*apiserv
 			}
 		}
 
-		val.structuralSchemas[schema.GroupVersionKind{
-			Group:   gvk.Group,
-			Version: v.Name,
-			Kind:    gvk.Kind,
+		val.structuralSchemas[metav1.GroupVersionResource{
+			Group:    gvr.Group,
+			Version:  v.Name,
+			Resource: gvr.Resource,
 		}] = s
 	}
 
-	if existing, exists := val.structuralSchemas[gvk]; exists {
+	if existing, exists := val.structuralSchemas[gvr]; exists {
 		return existing, nil
 	}
 
 	return nil, errors.New("version not found")
 }
 
-func (v *validator) Validate(oldObj, obj runtime.Object) error {
+func (v *validator) Validate(gvr metav1.GroupVersionResource, oldObj, obj interface{}) error {
 	// 1. Find rules which match against this object
 	// 2. Find compiled CEL rules for this object's type. If not yet
 	//	seen, compile for this type and save.
 	//	TODO: use bounded LRU cache?
 	// 3. Ask all CEL rules to validate for us
 	var failures field.ErrorList
-	gvk := obj.GetObjectKind().GroupVersionKind()
 
-	//!TODO: not this. the admissionreview has access to the requested resource
-	// already. also we are unsure if that is an appropriate thing to filter by?
-	gvr, err := v.restMapper.RESTMapping(runtimeschema.GroupKind{
-		Group: gvk.Group,
-		Kind:  gvk.Kind,
-	}, gvk.Version)
-
-	if err != nil {
-		return err
-	}
 	//!TODO: expensive to compute. change to computing lazily only if there
 	// ended up being a match for this gvk among the registered rules
-	structural, err := v.getStructuralSchema(gvk)
+	structural, err := v.getStructuralSchema(gvr)
 	if err != nil {
 		return err
 	}
@@ -215,8 +195,8 @@ func (v *validator) Validate(oldObj, obj runtime.Object) error {
 
 	var celBudget int64 = cel.RuntimeCELCostBudget
 	for _, entry := range v.registeredRuleSets {
-		if entry.Matches(gvr.Resource) {
-			compiled, exists := entry.compiledRules[gvk]
+		if entry.Matches(gvr) {
+			compiled, exists := entry.compiledRules[gvr]
 			if !exists {
 				// Compile the rules
 				// Get JSONSchemaProps from the CRD
@@ -270,19 +250,13 @@ func (v *validator) Validate(oldObj, obj runtime.Object) error {
 					validator:  cel.NewValidator(copied, cel.PerCallLimit),
 					structural: copied,
 				}
-				entry.compiledRules[gvk] = compiled
+				entry.compiledRules[gvr] = compiled
 			}
+
 			var errorList field.ErrorList
 
-			var o interface{} = obj
-			var old interface{} = oldObj
-			if uns, ok := obj.(runtime.Unstructured); ok && uns != nil {
-				o = uns.UnstructuredContent()
-			}
-
-			if uns, ok := oldObj.(runtime.Unstructured); ok && uns != nil {
-				old = uns.UnstructuredContent()
-			}
+			o, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+			old, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(oldObj)
 
 			errorList, celBudget = compiled.validator.Validate(
 				context.TODO(),
@@ -296,7 +270,6 @@ func (v *validator) Validate(oldObj, obj runtime.Object) error {
 			if len(errorList) > 0 {
 				failures = append(failures, errorList...)
 			}
-
 		}
 	}
 
@@ -304,7 +277,8 @@ func (v *validator) Validate(oldObj, obj runtime.Object) error {
 		for _, e := range failures {
 			klog.Error(e)
 		}
-		return errors.New("validation failed")
+
+		return failures.ToAggregate()
 	}
 
 	return nil
@@ -316,7 +290,7 @@ func (v *validator) AddRuleSet(ruleSet *polyfillv1.ValidationRuleSet) {
 
 	v.registeredRuleSets[ruleSet.Namespace+"/"+ruleSet.Name] = ruleSetCacheEntry{
 		source:        ruleSet,
-		compiledRules: make(map[runtimeschema.GroupVersionKind]compileRule),
+		compiledRules: make(map[metav1.GroupVersionResource]compileRule),
 	}
 }
 
