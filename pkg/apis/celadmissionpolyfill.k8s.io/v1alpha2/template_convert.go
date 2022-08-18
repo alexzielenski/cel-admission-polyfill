@@ -2,11 +2,60 @@ package v1alpha2
 
 import (
 	"encoding/json"
+	"reflect"
 
 	"github.com/google/cel-policy-templates-go/policy/model"
 	"github.com/google/cel-policy-templates-go/policy/parser"
 	metav1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
+
+type HackyTermMap struct {
+	t TermMap
+}
+
+var _ json.Marshaler = HackyTermMap{t: nil}
+
+func (h HackyTermMap) MarshalJSON() ([]byte, error) {
+	t := h.t
+
+	if t == nil {
+		return []byte(`null`), nil
+	} else if len(t) == 0 {
+		return []byte(`{}`), nil
+	}
+
+	out := []byte(`{`)
+	for _, e := range t {
+		key, err := json.Marshal(e.Name)
+		if err != nil {
+			return nil, err
+		}
+
+		val, err := json.Marshal(e.Value)
+		if err != nil {
+			return nil, err
+		}
+
+		out = append(out, key...)
+		out = append(out, ':')
+		out = append(out, val...)
+		out = append(out, ',')
+	}
+	out[len(out)-1] = '}'
+	return out, nil
+}
+
+func wipeZeroes(m map[string]interface{}) {
+	for k, v := range m {
+		if reflect.ValueOf(v).IsZero() {
+			delete(m, k)
+		}
+
+		if nextM, ok := v.(map[string]interface{}); ok {
+			wipeZeroes(nextM)
+		}
+	}
+}
 
 func PolicyTemplateToCELPolicyTemplate(template *PolicyTemplate) (*model.Source, *model.ParsedValue, error) {
 	// re-arrange document into format parser expects
@@ -18,18 +67,25 @@ func PolicyTemplateToCELPolicyTemplate(template *PolicyTemplate) (*model.Source,
 			"name":      template.Name,
 			"namespace": template.Namespace,
 		},
-		"evaluator": template.Evaluator,
+		"evaluator": map[string]interface{}{
+			"description": template.Evaluator.Description,
+			"environment": template.Evaluator.Environment,
+			"productions": template.Evaluator.Productions,
+			"terms":       HackyTermMap{t: template.Evaluator.Terms},
+			"ranges":      template.Evaluator.Ranges,
+		},
+		//!TODO: terms also busted in validator
+		"validator": template.Validator,
 	}
 
-	if template.Validator != nil {
-		reformatted["validator"] = template.Validator
-	}
+	wipeZeroes(reformatted)
 
 	yamled, err := json.MarshalIndent(reformatted, "", "    ")
 	if err != nil {
 		return nil, nil, err
 	}
 
+	println(string(yamled))
 	source := model.ByteSource(yamled, "")
 	parsed, issues := parser.ParseYaml(source)
 	if issues != nil {

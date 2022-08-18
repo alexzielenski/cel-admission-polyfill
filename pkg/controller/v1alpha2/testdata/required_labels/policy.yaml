@@ -28,9 +28,12 @@ spec:
         additionalProperties: {}
   evaluator:
     terms:
-      want: rule.labels
-      missing: want.filter(l, !(l in resource.labels))
-      invalid: >
+    - name: want
+      value: want.filter(l, !(l in resource.labels))
+    - name: missing
+      value: want.filter(l, !(l in resource.labels))
+    - name: invalid
+      value: >
         resource.labels.filter(l,
           l in want && want[l] != resource.labels[l])
     productions:

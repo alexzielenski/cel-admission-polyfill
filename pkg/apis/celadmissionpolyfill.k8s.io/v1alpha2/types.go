@@ -50,7 +50,7 @@ type Validator struct {
 	Productions []ValidatorProduction `json:"productions"`
 
 	// +optional
-	Terms map[string]runtime.RawExtension `json:"terms,omitempty"`
+	Terms TermMap `json:"terms,omitempty"`
 }
 
 type Evaluator struct {
@@ -64,11 +64,22 @@ type Evaluator struct {
 	Productions []Production `json:"productions,omitempty"`
 
 	// +optional
-	Terms map[string]string `json:"terms,omitempty"`
+	Terms TermMap `json:"terms,omitempty"`
 
 	// +optional
 	Ranges []EvaluatorRange `json:"ranges,omitempty"`
 }
+
+type Term struct {
+	Name string `json:"name"`
+	//!TODO: evaluator requires this is a string
+	Value runtime.RawExtension `json:"value"`
+}
+
+// +listType=map
+// +listMapType=granular
+// +listMapKey=name
+type TermMap []Term
 
 type EvaluatorRange struct {
 	// +required

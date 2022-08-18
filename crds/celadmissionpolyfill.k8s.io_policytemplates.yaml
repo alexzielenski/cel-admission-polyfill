@@ -81,9 +81,21 @@ spec:
                       type: object
                     type: array
                   terms:
-                    additionalProperties:
-                      type: string
-                    type: object
+                    items:
+                      properties:
+                        name:
+                          type: string
+                        value:
+                          description: '!TODO: evaluator requires this is a string'
+                          type: object
+                      required:
+                      - name
+                      - value
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
                 type: object
               pluralName:
                 type: string
@@ -148,9 +160,21 @@ spec:
                       type: object
                     type: array
                   terms:
-                    additionalProperties:
+                    items:
+                      properties:
+                        name:
+                          type: string
+                        value:
+                          description: '!TODO: evaluator requires this is a string'
+                          type: object
+                      required:
+                      - name
+                      - value
                       type: object
-                    type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
                 required:
                 - productions
                 type: object
