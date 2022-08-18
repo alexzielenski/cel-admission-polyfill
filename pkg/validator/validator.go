@@ -2,31 +2,22 @@ package validator
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"sync"
 
 	polyfillv1 "github.com/alexzielenski/cel_polyfill/pkg/apis/celadmissionpolyfill.k8s.io/v1alpha1"
+	"github.com/alexzielenski/cel_polyfill/pkg/controller/structuralschema"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
-	apiextensionshelpers "k8s.io/apiextensions-apiserver/pkg/apihelpers"
-	apiextensionsinternal "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiserverschema "k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/cel"
-	structuraldefaulting "k8s.io/apiextensions-apiserver/pkg/apiserver/schema/defaulting"
-	apiextensionsv1listers "k8s.io/apiextensions-apiserver/pkg/client/listers/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/klog/v2"
 )
 
-type Interface interface {
-	// Validates the object and returns nil if it succeeds
-	// or an error explaining why the object fails validation
-	// Thread-Safe
-	Validate(gvr metav1.GroupVersionResource, oldObj, obj interface{}) error
+type RuleSetValidator interface {
+	Interface
 
 	// Adds a Ruleset to be enforced by the Validate function.
 	// If there is an existing ruleset with the same namespace/name, if is
@@ -42,12 +33,11 @@ type Interface interface {
 }
 
 type validator struct {
-	crdLister apiextensionsv1listers.CustomResourceDefinitionLister
+	structuralSchemaController structuralschema.Controller
 
 	//!TODO: refactor Validate and change to RWMutex
 	lock               sync.Mutex
 	registeredRuleSets map[string]ruleSetCacheEntry
-	structuralSchemas  map[metav1.GroupVersionResource]*apiserverschema.Structural
 }
 
 type compileRule struct {
@@ -105,74 +95,12 @@ func (r ruleSetCacheEntry) Matches(gvr metav1.GroupVersionResource) bool {
 }
 
 func New(
-	crdLister apiextensionsv1listers.CustomResourceDefinitionLister,
-) Interface {
+	structuralSchemaController structuralschema.Controller,
+) RuleSetValidator {
 	return &validator{
-		crdLister:          crdLister,
-		structuralSchemas:  make(map[metav1.GroupVersionResource]*apiserverschema.Structural),
-		registeredRuleSets: make(map[string]ruleSetCacheEntry),
+		registeredRuleSets:         make(map[string]ruleSetCacheEntry),
+		structuralSchemaController: structuralSchemaController,
 	}
-}
-
-func (val *validator) getStructuralSchema(gvr metav1.GroupVersionResource) (*apiserverschema.Structural, error) {
-	//!TODO: does not take into account CRD updates after things have been cached
-	// should save RV of cached structurals. if does not match most recent should
-	// re-create
-	if existing, exists := val.structuralSchemas[gvr]; exists {
-		return existing, nil
-	}
-
-	name := gvr.Resource + "." + gvr.Group
-
-	crd, err := val.crdLister.Get(name)
-	if err != nil {
-		return nil, errors.New("crd not found")
-	}
-
-	// copied from https://github.com/kubernetes/kubernetes/blob/01cf641ffbb3c876c4fc6c3e53a0613356f883e5/staging/src/k8s.io/apiextensions-apiserver/pkg/apiserver/customresource_handler.go#L650-L651
-	for _, v := range crd.Spec.Versions {
-		sch, err := apiextensionshelpers.GetSchemaForVersion(crd, v.Name)
-		if err != nil {
-			utilruntime.HandleError(err)
-			return nil, fmt.Errorf("the server could not properly serve the CR schema")
-		}
-		if sch == nil {
-			continue
-		}
-		internalValidation := &apiextensionsinternal.CustomResourceValidation{}
-		if err := apiextensionsv1.Convert_v1_CustomResourceValidation_To_apiextensions_CustomResourceValidation(sch, internalValidation, nil); err != nil {
-			return nil, fmt.Errorf("failed converting CRD validation to internal version: %v", err)
-		}
-		s, err := apiserverschema.NewStructural(internalValidation.OpenAPIV3Schema)
-		if !crd.Spec.PreserveUnknownFields && err != nil {
-			// This should never happen. If it does, it is a programming error.
-			utilruntime.HandleError(fmt.Errorf("failed to convert schema to structural: %v", err))
-			return nil, fmt.Errorf("the server could not properly serve the CR schema") // validation should avoid this
-		}
-
-		if !crd.Spec.PreserveUnknownFields {
-			// we don't own s completely, e.g. defaults are not deep-copied. So better make a copy here.
-			s = s.DeepCopy()
-
-			if err := structuraldefaulting.PruneDefaults(s); err != nil {
-				// This should never happen. If it does, it is a programming error.
-				utilruntime.HandleError(fmt.Errorf("failed to prune defaults: %v", err))
-				return nil, fmt.Errorf("the server could not properly serve the CR schema") // validation should avoid this
-			}
-		}
-
-		val.structuralSchemas[metav1.GroupVersionResource{
-			Group:    gvr.Group,
-			Version:  v.Name,
-			Resource: gvr.Resource,
-		}] = s
-	}
-
-	if existing, exists := val.structuralSchemas[gvr]; exists {
-		return existing, nil
-	}
-
-	return nil, errors.New("version not found")
 }
 
 func (v *validator) Validate(gvr metav1.GroupVersionResource, oldObj, obj interface{}) error {
@@ -185,7 +113,7 @@ func (v *validator) Validate(gvr metav1.GroupVersionResource, oldObj, obj interf
 
 	//!TODO: expensive to compute. change to computing lazily only if there
 	// ended up being a match for this gvk among the registered rules
-	structural, err := v.getStructuralSchema(gvr)
+	structural, err := v.structuralSchemaController.Get(gvr)
 	if err != nil {
 		return err
 	}

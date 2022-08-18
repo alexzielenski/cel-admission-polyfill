@@ -34,11 +34,6 @@ type Informer[T runtime.Object] interface {
 // TLister helps list Ts.
 // All objects returned here must be treated as read-only.
 type Lister[T runtime.Object] interface {
-	// List lists all ValidationRuleSets in the indexer for a given namespace.
-	// Objects returned here must be treated as read-only.
-	List(namespace string, selector labels.Selector) (ret []T, err error)
-
-	// Get retrieves the ValidationRuleSet from the indexer for a given namespace and name.
-	// Objects returned here must be treated as read-only.
-	Get(namespace string, name string) (T, error)
+	NamespacedLister[T]
+	Namespaced(string) NamespacedLister[T]
 }

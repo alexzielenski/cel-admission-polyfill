@@ -11,7 +11,7 @@ import (
 
 func NewAdmissionRulesController(
 	ruleSetsInformer informers.ValidationRuleSetInformer,
-	validator validator.Interface,
+	validator validator.RuleSetValidator,
 ) controller.Interface {
 	name := "admissionRulesController"
 	result := &admissionRulesController{
@@ -31,7 +31,7 @@ func NewAdmissionRulesController(
 
 type admissionRulesController struct {
 	name       string
-	validator  validator.Interface
+	validator  validator.RuleSetValidator
 	controller controller.Interface
 }
 

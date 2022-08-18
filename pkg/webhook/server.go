@@ -9,11 +9,11 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/alexzielenski/cel_polyfill/pkg/validator"
 	admissionv1 "k8s.io/api/admission/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	admissionregistrationv1apply "k8s.io/client-go/applyconfigurations/admissionregistration/v1"
 	"k8s.io/client-go/kubernetes"
@@ -39,14 +39,7 @@ type Interface interface {
 	Run(ctx context.Context) error
 }
 
-type Validator interface {
-	// Validates the object and returns nil if it succeeds
-	// or an error explaining why the object fails validation
-	// Thread-Safe
-	Validate(gvr metav1.GroupVersionResource, oldObj, obj runtime.Object) error
-}
-
-func New(certs CertInfo, validator Validator) Interface {
+func New(certs CertInfo, validator validator.Interface) Interface {
 	return &webhook{
 		CertInfo:  certs,
 		port:      9091,
@@ -55,9 +48,8 @@ func New(certs CertInfo, validator Validator) Interface {
 }
 
 type webhook struct {
-	client    kubernetes.Interface
 	port      uint16
-	validator Validator
+	validator validator.Interface
 	CertInfo
 }
 

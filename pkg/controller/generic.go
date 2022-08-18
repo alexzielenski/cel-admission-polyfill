@@ -193,21 +193,30 @@ func (c *controller[T]) runWorker() {
 func (c *controller[T]) reconcile(key string) error {
 	var newObj T
 	var err error
+	var namespace string
+	var name string
+	var lister NamespacedLister[T]
 
 	// Convert the namespace/name string into a distinct namespace and name
-	namespace, name, err := cache.SplitMetaNamespaceKey(key)
+	namespace, name, err = cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("invalid resource key: %s", key))
 		return nil
 	}
 
-	newObj, err = c.lister.Get(namespace, name)
+	if len(namespace) > 0 {
+		lister = c.lister.Namespaced(namespace)
+	} else {
+		lister = c.lister
+	}
+
+	newObj, err = lister.Get(name)
 	if err != nil {
 		if !kerrors.IsNotFound(err) {
 			return err
 		}
 
-		// Rule was deleted. Remove it from our database of enforced rules
+		// Deleted object. Inform reconciler with empty
 	}
 
 	return c.reconciler(namespace, name, newObj)

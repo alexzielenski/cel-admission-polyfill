@@ -10,21 +10,22 @@ import (
 
 var _ Lister[runtime.Object] = lister[runtime.Object]{}
 
-type lister[T runtime.Object] struct {
-	indexer cache.Indexer
+type namespacedLister[T runtime.Object] struct {
+	indexer   cache.Indexer
+	namespace string
 }
 
-func (w lister[T]) List(namespace string, selector labels.Selector) (ret []T, err error) {
-	err = cache.ListAllByNamespace(w.indexer, namespace, selector, func(m interface{}) {
+func (w namespacedLister[T]) List(selector labels.Selector) (ret []T, err error) {
+	err = cache.ListAllByNamespace(w.indexer, w.namespace, selector, func(m interface{}) {
 		ret = append(ret, m.(T))
 	})
 	return ret, err
 }
 
-func (w lister[T]) Get(namespace string, name string) (T, error) {
+func (w namespacedLister[T]) Get(name string) (T, error) {
 	var result T
 
-	obj, exists, err := w.indexer.GetByKey(namespace + "/" + name)
+	obj, exists, err := w.indexer.GetByKey(w.namespace + "/" + name)
 	if err != nil {
 		return result, err
 	}
@@ -33,6 +34,35 @@ func (w lister[T]) Get(namespace string, name string) (T, error) {
 	}
 	result = obj.(T)
 	return result, nil
+}
+
+type lister[T runtime.Object] struct {
+	indexer cache.Indexer
+}
+
+func (w lister[T]) List(selector labels.Selector) (ret []T, err error) {
+	err = cache.ListAll(w.indexer, selector, func(m interface{}) {
+		ret = append(ret, m.(T))
+	})
+	return ret, err
+}
+
+func (w lister[T]) Get(name string) (T, error) {
+	var result T
+
+	obj, exists, err := w.indexer.GetByKey(name)
+	if err != nil {
+		return result, err
+	}
+	if !exists {
+		return result, kerrors.NewNotFound(v1alpha1.Resource("validationruleset"), name)
+	}
+	result = obj.(T)
+	return result, nil
+}
+
+func (w lister[T]) Namespaced(namespace string) NamespacedLister[T] {
+	return namespacedLister[T]{namespace: namespace, indexer: w.indexer}
 }
 
 func NewLister[T runtime.Object](indexer cache.Indexer) Lister[T] {

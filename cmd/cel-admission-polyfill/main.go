@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alexzielenski/cel_polyfill/pkg/controller/structuralschema"
 	controllerv1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/controller/v1alpha1"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/scheme"
@@ -70,7 +71,11 @@ func main() {
 	// What is appropriate resync perriod?
 	customFactory := externalversions.NewSharedInformerFactory(customClient, 30*time.Second)
 	apiextensionsFactory := apiextensionsinformers.NewSharedInformerFactory(apiextensionsClient, 30*time.Second)
-	validator := validator.New(apiextensionsFactory.Apiextensions().V1().CustomResourceDefinitions().Lister())
+
+	structuralschemaController := structuralschema.NewController(
+		apiextensionsFactory.Apiextensions().V1().CustomResourceDefinitions().Informer(),
+	)
+	validator := validator.New(structuralschemaController)
 
 	// Start HTTP REST server for webhook
 	waitGroup.Add(1)
@@ -97,8 +102,6 @@ func main() {
 		waitGroup.Done()
 	}()
 
-	waitGroup.Add(1)
-
 	// call outside of goroutine so that informer is requested before we start
 	// factory. (for some reason factory doesn't start informers requested
 	// after it was already started?)
@@ -106,6 +109,8 @@ func main() {
 		customFactory.Celadmissionpolyfill().V1alpha1().ValidationRuleSets(),
 		validator,
 	)
+
+	waitGroup.Add(1)
 	go func() {
 		// Start k8s operator for digesting validation configuration
 
@@ -164,4 +169,12 @@ func locateCertificates() webhook.CertInfo {
 	}
 
 	return webhook.CertInfo{}
+}
+
+func StartV1Alpha1() {
+
+}
+
+func StartV1Alpha2() {
+
 }

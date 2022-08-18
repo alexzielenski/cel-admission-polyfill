@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/alexzielenski/cel_polyfill/pkg/apis/celadmissionpolyfill.k8s.io/v1alpha1"
+	"github.com/alexzielenski/cel_polyfill/pkg/controller/structuralschema"
 	controllerv1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/controller/v1alpha1"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/fake"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions"
@@ -34,7 +35,10 @@ func TestBasic(t *testing.T) {
 
 	// Two main pieces of functionaltiy: Validate Objects, and Store Rules
 	// Starts empty
-	validator := validator.New(apiextensionsFactory.Apiextensions().V1().CustomResourceDefinitions().Lister())
+	structuralschemaController := structuralschema.NewController(
+		apiextensionsFactory.Apiextensions().V1().CustomResourceDefinitions().Informer(),
+	)
+	validator := validator.New(structuralschemaController)
 
 	// Populates the validator with rule sets depending upon the CRD definition
 	controller := controllerv1alpha1.NewAdmissionRulesController(
