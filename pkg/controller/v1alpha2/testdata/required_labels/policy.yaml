@@ -29,7 +29,7 @@ spec:
   evaluator:
     terms:
     - name: want
-      value: want.filter(l, !(l in resource.labels))
+      value: rule.labels
     - name: missing
       value: want.filter(l, !(l in resource.labels))
     - name: invalid

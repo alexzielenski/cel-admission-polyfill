@@ -63,6 +63,7 @@ func PolicyTemplateToCELPolicyTemplate(template *PolicyTemplate) (*model.Source,
 	reformatted := map[string]interface{}{
 		"apiVersion": template.APIVersion,
 		"kind":       template.Kind,
+		"schema":     template.Schema,
 		"metadata": map[string]string{
 			"name":      template.Name,
 			"namespace": template.Namespace,
