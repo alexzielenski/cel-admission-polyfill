@@ -28,17 +28,12 @@ import (
 
 type CeladmissionpolyfillV1alpha2Interface interface {
 	RESTClient() rest.Interface
-	EnvironmentsGetter
 	PolicyTemplatesGetter
 }
 
 // CeladmissionpolyfillV1alpha2Client is used to interact with features provided by the celadmissionpolyfill.k8s.io group.
 type CeladmissionpolyfillV1alpha2Client struct {
 	restClient rest.Interface
-}
-
-func (c *CeladmissionpolyfillV1alpha2Client) Environments(namespace string) EnvironmentInterface {
-	return newEnvironments(c, namespace)
 }
 
 func (c *CeladmissionpolyfillV1alpha2Client) PolicyTemplates(namespace string) PolicyTemplateInterface {

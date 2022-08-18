@@ -21,9 +21,12 @@ import (
 var _ Interface = &controller[runtime.Object]{}
 
 type controller[T runtime.Object] struct {
-	lister     Lister[T]
-	informer   cache.SharedIndexInformer
-	queue      workqueue.RateLimitingInterface
+	lister   Lister[T]
+	informer cache.SharedIndexInformer
+	queue    workqueue.RateLimitingInterface
+
+	// Returns an error if there was a transient error during reconciliation
+	// and the object should be tried again later.
 	reconciler func(namespace, name string, newObj T) error
 
 	options ControllerOptions

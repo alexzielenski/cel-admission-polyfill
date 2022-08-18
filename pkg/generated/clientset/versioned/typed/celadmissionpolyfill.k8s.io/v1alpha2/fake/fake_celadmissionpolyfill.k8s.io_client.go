@@ -28,10 +28,6 @@ type FakeCeladmissionpolyfillV1alpha2 struct {
 	*testing.Fake
 }
 
-func (c *FakeCeladmissionpolyfillV1alpha2) Environments(namespace string) v1alpha2.EnvironmentInterface {
-	return &FakeEnvironments{c, namespace}
-}
-
 func (c *FakeCeladmissionpolyfillV1alpha2) PolicyTemplates(namespace string) v1alpha2.PolicyTemplateInterface {
 	return &FakePolicyTemplates{c, namespace}
 }

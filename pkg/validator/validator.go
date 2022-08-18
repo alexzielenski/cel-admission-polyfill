@@ -50,20 +50,20 @@ type ruleSetCacheEntry struct {
 	compiledRules map[metav1.GroupVersionResource]compileRule
 }
 
-func isWildcard(s []string) bool {
-	return len(s) == 1 && s[0] == "*"
-}
-
-func hasMatch(within []string, search string) bool {
-	for _, q := range within {
-		if q == search {
-			return true
-		}
-	}
-	return false
-}
-
 func (r ruleSetCacheEntry) Matches(gvr metav1.GroupVersionResource) bool {
+	isWildcard := func(s []string) bool {
+		return len(s) == 1 && s[0] == "*"
+	}
+
+	hasMatch := func(within []string, search string) bool {
+		for _, q := range within {
+			if q == search {
+				return true
+			}
+		}
+		return false
+	}
+
 	if len(r.source.Spec.Match) == 0 {
 		return false
 	}

@@ -18,14 +18,6 @@ limitations under the License.
 
 package v1alpha2
 
-// EnvironmentListerExpansion allows custom methods to be added to
-// EnvironmentLister.
-type EnvironmentListerExpansion interface{}
-
-// EnvironmentNamespaceListerExpansion allows custom methods to be added to
-// EnvironmentNamespaceLister.
-type EnvironmentNamespaceListerExpansion interface{}
-
 // PolicyTemplateListerExpansion allows custom methods to be added to
 // PolicyTemplateLister.
 type PolicyTemplateListerExpansion interface{}

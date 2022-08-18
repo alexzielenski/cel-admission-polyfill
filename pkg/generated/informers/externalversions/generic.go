@@ -58,8 +58,6 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Celadmissionpolyfill().V1alpha1().ValidationRuleSets().Informer()}, nil
 
 		// Group=celadmissionpolyfill.k8s.io, Version=v1alpha2
-	case v1alpha2.SchemeGroupVersion.WithResource("environments"):
-		return &genericInformer{resource: resource.GroupResource(), informer: f.Celadmissionpolyfill().V1alpha2().Environments().Informer()}, nil
 	case v1alpha2.SchemeGroupVersion.WithResource("policytemplates"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Celadmissionpolyfill().V1alpha2().PolicyTemplates().Informer()}, nil
 

@@ -24,55 +24,6 @@ spec:
               of an object. Servers should convert recognized schemas to the latest
               internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
             type: string
-          evaluator:
-            properties:
-              environment:
-                type: string
-              productions:
-                items:
-                  properties:
-                    decision:
-                      type: string
-                    decisionRef:
-                      type: string
-                    decisions:
-                      items:
-                        properties:
-                          decision:
-                            type: string
-                          decisionRef:
-                            type: string
-                          output:
-                            type: object
-                        type: object
-                      type: array
-                    match:
-                      type: string
-                    output:
-                      type: object
-                  required:
-                  - decisions
-                  - match
-                  type: object
-                type: array
-              ranges:
-                items:
-                  properties:
-                    in:
-                      type: string
-                    index:
-                      type: string
-                    key:
-                      type: string
-                    value:
-                      type: string
-                  type: object
-                type: array
-              terms:
-                additionalProperties:
-                  type: string
-                type: object
-            type: object
           kind:
             description: 'Kind is a string value representing the REST resource this
               object represents. Servers may infer this from the endpoint the client
@@ -80,41 +31,129 @@ spec:
             type: string
           metadata:
             type: object
-          schema:
-            description: Copy-pasted from upstream cel-policy-template. Needed to
-              add JSON tags to use with CRD generator.
+          spec:
             properties:
-              $ref:
-                type: string
-              additionalProperties: {}
-              default:
+              evaluator:
+                properties:
+                  description:
+                    type: string
+                  environment:
+                    type: string
+                  productions:
+                    items:
+                      properties:
+                        decision:
+                          type: string
+                        decisionRef:
+                          type: string
+                        decisions:
+                          items:
+                            properties:
+                              decision:
+                                type: string
+                              decisionRef:
+                                type: string
+                              output:
+                                type: object
+                            required:
+                            - output
+                            type: object
+                          type: array
+                        match:
+                          type: string
+                        output:
+                          type: object
+                      type: object
+                    type: array
+                  ranges:
+                    items:
+                      properties:
+                        in:
+                          type: string
+                        index:
+                          type: string
+                        key:
+                          type: string
+                        value:
+                          type: string
+                      required:
+                      - in
+                      type: object
+                    type: array
+                  terms:
+                    additionalProperties:
+                      type: string
+                    type: object
                 type: object
-              description:
+              pluralName:
                 type: string
-              enum:
-                items:
-                  type: object
-                type: array
-              format:
-                type: string
-              items: {}
-              metadata:
-                additionalProperties:
-                  type: string
+              schema:
+                description: 'Copy-pasted from upstream cel-policy-template. Needed
+                  to add JSON tags to use with CRD generator. !TODO: Figure out if
+                  there is a way to reconcile this OpenAPI schema def with the upstream
+                  k8s version so a single type can be used. Converting different OpenAPI
+                  formats already is a huge perf hit in apiserver'
+                properties:
+                  $ref:
+                    type: string
+                  additionalProperties: {}
+                  default:
+                    x-kubernetes-preserve-unknown-fields: true
+                  description:
+                    type: string
+                  enum:
+                    items:
+                      x-kubernetes-preserve-unknown-fields: true
+                    type: array
+                  format:
+                    type: string
+                  items: {}
+                  metadata:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  properties:
+                    additionalProperties: {}
+                    type: object
+                  required:
+                    items:
+                      type: string
+                    type: array
+                  title:
+                    type: string
+                  type:
+                    type: string
+                  type_param:
+                    type: string
                 type: object
-              properties:
-                additionalProperties: {}
+              validator:
+                properties:
+                  description:
+                    type: string
+                  environment:
+                    type: string
+                  productions:
+                    items:
+                      properties:
+                        details:
+                          type: object
+                        field:
+                          type: string
+                        match:
+                          type: string
+                        message:
+                          type: string
+                      required:
+                      - message
+                      type: object
+                    type: array
+                  terms:
+                    additionalProperties:
+                      type: object
+                    type: object
+                required:
+                - productions
                 type: object
-              required:
-                items:
-                  type: string
-                type: array
-              title:
-                type: string
-              type:
-                type: string
-              type_param:
-                type: string
             type: object
         type: object
     served: true

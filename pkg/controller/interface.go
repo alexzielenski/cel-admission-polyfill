@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -26,14 +25,14 @@ type NamespacedLister[T any] interface {
 	Get(name string) (T, error)
 }
 
-type Informer[T runtime.Object] interface {
+type Informer[T any] interface {
 	Informer() cache.SharedIndexInformer
 	Lister() Lister[T]
 }
 
 // TLister helps list Ts.
 // All objects returned here must be treated as read-only.
-type Lister[T runtime.Object] interface {
+type Lister[T any] interface {
 	NamespacedLister[T]
 	Namespaced(string) NamespacedLister[T]
 }
