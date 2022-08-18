@@ -156,34 +156,13 @@ func (c *templateController) reconcilePolicyTemplate(
 		},
 	}
 
-	// bytes, err := json.Marshal(crd)
-	// if err != nil {
-	// 	utilruntime.HandleError(err)
-	// 	return nil
-	// }
-
+	//!TODO: dont use create if object exists. Unfortunately Patch can't
+	// be used to create object if it doesnt already exist?
 	_, err := c.crdClient.
 		ApiextensionsV1().
 		CustomResourceDefinitions().Create(context.TODO(), &crd, metav1.CreateOptions{
 		FieldManager: "template-controller",
 	})
-
-	// _, err := c.crdClient.
-	// 	ApiextensionsV1().
-	// 	CustomResourceDefinitions().Update(context.TODO(), &crd, metav1.UpdateOptions{
-	// 	FieldManager: "template-controller",
-	// })
-
-	// _, err = c.crdClient.
-	// 	ApiextensionsV1().
-	// 	CustomResourceDefinitions().
-	// 	Patch(
-	// 		context.TODO(),
-	// 		template.Name+"."+template.GroupVersionKind().Group,
-	// 		types.ApplyPatchType,
-	// 		bytes,
-	// 		metav1.PatchOptions{},
-	// 	)
 
 	if err != nil {
 		utilruntime.HandleError(err)
@@ -194,22 +173,15 @@ func (c *templateController) reconcilePolicyTemplate(
 	defer c.lock.Unlock()
 
 	// Convert input template into a model.Value
-	//
-	//!TODO NEXT: use PolicyTemplateToCELPolicyTemplate stub to create model.template
-	// as compiledTemplate variable
-	//
-	// fill out stub.
-	// test it out
-	//
-	// prob want to fork the policy stuff
-	// need to be able to remove templates/instances
-	// also compile template from model.Value instead of yaml
-	//	or do we want to create yaml and reparse from there rather than going thru
-	//	model.Value?
-	//
-	// Also where does structural Schema fit into this? seems like cel-policy-templates
+	// TODO: where does structural Schema fit into this? seems like cel-policy-templates
 	// handles openapi schemas itself? How does that fit within k8s? Does it matter?
 	// What did k8s cel lib provide that we are missing if using cel-policy-templates directly
+	//
+	//
+	// Below code is not working. When compiling required_labels template,
+	// Undeclared reference to "resource" and "rule"
+	// 	or "rule.labels" (part of rule schema)
+	// 	as well as terms defined within template such as "want"
 	source, celConversion, err := v1alpha2.PolicyTemplateToCELPolicyTemplate(template)
 	if err != nil {
 		// Processing the template again won't solve this error
