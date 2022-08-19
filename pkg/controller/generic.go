@@ -47,7 +47,7 @@ func New[T runtime.Object](
 	}
 
 	if len(options.Name) == 0 {
-		options.Name = fmt.Sprintf("%T-controller", new(T))
+		options.Name = fmt.Sprintf("%T-controller", *new(T))
 	}
 
 	return &controller[T]{

@@ -8,10 +8,13 @@ import (
 	"time"
 
 	"github.com/alexzielenski/cel_polyfill/pkg/apis/celadmissionpolyfill.k8s.io/v1alpha2"
+	"github.com/alexzielenski/cel_polyfill/pkg/controller"
 	"github.com/alexzielenski/cel_polyfill/pkg/controller/structuralschema"
 	controllerv1alpha2 "github.com/alexzielenski/cel_polyfill/pkg/controller/v1alpha2"
+	"github.com/alexzielenski/cel_polyfill/pkg/controller/v1alpha2/testdata"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/fake"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions"
+	"github.com/alexzielenski/cel_polyfill/pkg/validator"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,10 +24,17 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 	apiextensionsinformers "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 )
+
+type IntrospectableController interface {
+	controller.Interface
+	validator.Interface
+	GetNumberInstances(templateName string) int
+}
 
 func TestBasic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -32,6 +42,17 @@ func TestBasic(t *testing.T) {
 	scheme := runtime.NewScheme()
 	scheme.AddKnownTypeWithName(schema.GroupVersionKind{Group: "celadmissionpolyfill.k8s.io", Version: "v1alpha2", Kind: "required_labels"}, &unstructured.Unstructured{})
 	scheme.AddKnownTypeWithName(schema.GroupVersionKind{Group: "celadmissionpolyfill.k8s.io", Version: "v1alpha2", Kind: "required_labelsList"}, &unstructured.UnstructuredList{})
+
+	crd := &apiextensionsv1.CustomResourceDefinition{}
+	file, err := ioutil.ReadFile("testdata/stable.example.com_basicunions.yaml")
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	decoder := yamlutil.NewYAMLOrJSONDecoder(bytes.NewReader(file), 24)
+	err = decoder.Decode(crd)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 
 	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
 		{
@@ -41,7 +62,7 @@ func TestBasic(t *testing.T) {
 		}: "required_labelsList",
 	})
 	client := fake.NewSimpleClientset()
-	fakeext := apiextensionsfake.NewSimpleClientset()
+	fakeext := apiextensionsfake.NewSimpleClientset(crd)
 
 	factory := externalversions.NewSharedInformerFactory(client, 30*time.Second)
 	apiextensionsFactory := apiextensionsinformers.NewSharedInformerFactory(fakeext, 30*time.Second)
@@ -55,7 +76,7 @@ func TestBasic(t *testing.T) {
 		factory.Celadmissionpolyfill().V1alpha2().PolicyTemplates().Informer(),
 		structuralschemaController,
 		fakeext,
-	)
+	).(IntrospectableController)
 
 	factory.Start(ctx.Done())
 	apiextensionsFactory.Start(ctx.Done())
@@ -69,12 +90,12 @@ func TestBasic(t *testing.T) {
 	}()
 
 	// Install policy
-	file, err := ioutil.ReadFile("testdata/required_labels/policy.yaml")
+	file, err = ioutil.ReadFile("testdata/required_labels/policy.yaml")
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
 	policy := &v1alpha2.PolicyTemplate{}
-	decoder := yamlutil.NewYAMLOrJSONDecoder(bytes.NewReader(file), 24)
+	decoder = yamlutil.NewYAMLOrJSONDecoder(bytes.NewReader(file), 24)
 	err = decoder.Decode(policy)
 	if err != nil {
 		t.Fatalf(err.Error())
@@ -88,7 +109,7 @@ func TestBasic(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 
-	err = wait.PollWithContext(ctx, 30*time.Millisecond, 1*time.Hour, func(ctx context.Context) (done bool, err error) {
+	err = wait.PollWithContext(ctx, 30*time.Millisecond, 1*time.Second, func(ctx context.Context) (done bool, err error) {
 		// Wait until CRD pops up
 		obj, err := fakeext.ApiextensionsV1().CustomResourceDefinitions().Get(
 			ctx,
@@ -133,6 +154,28 @@ func TestBasic(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 
-	<-ctx.Done()
+	// wait until policy is instantiated
+	err = wait.PollWithContext(ctx, 30*time.Millisecond, 1*time.Second, func(ctx context.Context) (done bool, err error) {
+		return controller.GetNumberInstances("required_labels") > 0, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Check rule is enforced
+	bunoin := testdata.BasicUnion{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "stable.example.com/v1",
+			Kind:       "BasicUnion",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "testobject",
+			Namespace: "default",
+		},
+	}
+
+	err = controller.Validate(metav1.GroupVersionResource(bunoin.GroupVersionKind().GroupVersion().WithResource("basicunions")), nil, bunoin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-ctx.Done()
 }

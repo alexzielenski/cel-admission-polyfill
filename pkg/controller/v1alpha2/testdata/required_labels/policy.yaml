@@ -31,21 +31,21 @@ spec:
     - name: want
       value: rule.labels
     - name: missing
-      value: want.filter(l, !(l in resource.labels))
+      value: want.filter(l, !(l in resource.metadata.labels))
     - name: invalid
       value: >
-        resource.labels.filter(l,
-          l in want && want[l] != resource.labels[l])
+        resource.metadata.labels.filter(l,
+          l in want && want[l] != resource.metadata.labels[l])
     productions:
       - match: missing.size() > 0
         decision: policy.violation
         output:
           message: missing one or more required labels
-          details:
-            data: missing
+          # details:
+          #   data: missing
       - match: invalid.size() > 0
         decision: policy.violation
         output:
           message: invalid values provided on one or more labels
-          details:
-            data: invalid
+          # details:
+          #   data: invalid

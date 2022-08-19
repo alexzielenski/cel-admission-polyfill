@@ -26,6 +26,7 @@ import (
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/cel/library"
 	celmodel "k8s.io/apiextensions-apiserver/third_party/forked/celopenapi/model"
 
+	structuralschemas "k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -71,6 +72,17 @@ type templateController struct {
 	templates map[string]templateInfo
 
 	runningContext context.Context
+}
+
+func (t *templateController) GetNumberInstances(templateName string) int {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+
+	info, exists := t.templates[templateName]
+	if !exists {
+		return 0
+	}
+	return len(info.instances)
 }
 
 type templateInfo struct {
@@ -205,7 +217,11 @@ func (c *templateController) reconcilePolicyTemplate(
 	if _, exists := c.templates[template.Name]; !exists {
 		instanceContext, instanceCancel := context.WithCancel(c.runningContext)
 		c.templates[template.Name] = templateInfo{
-			cancelFunc: instanceCancel,
+			cancelFunc:        instanceCancel,
+			instances:         make(map[string]instanceInfo),
+			template:          template,
+			compiler:          nil,
+			compiledTemplates: make(map[metav1.GroupVersionResource]*runtime.Template),
 		}
 
 		// Watch for new instances of this policy
@@ -252,7 +268,9 @@ func (c *templateController) reconcilePolicyTemplate(
 
 				return nil
 			},
-			controller.ControllerOptions{},
+			controller.ControllerOptions{
+				Name: fmt.Sprintf("%s.%s-instance-controller", template.GroupVersionKind().Version, template.Name),
+			},
 		)
 		go informer.Informer().Run(instanceContext.Done())
 		go controller.Run(instanceContext)
@@ -280,6 +298,8 @@ func (c *templateController) Validate(gvr metav1.GroupVersionResource, oldObj, o
 
 			lims := limits.NewLimits()
 			env, err := cel.NewEnv(
+				// TODO: this breaks the ability to use output message and details
+				// TODO: should output be added to the schema rather than raw extension?
 				cel.HomogeneousAggregateLiterals(),
 			)
 			if err != nil {
@@ -299,6 +319,12 @@ func (c *templateController) Validate(gvr metav1.GroupVersionResource, oldObj, o
 				utilruntime.HandleError(err)
 				return nil
 			}
+
+			structural = celmodel.WithTypeAndObjectMeta(structural)
+
+			// WithTypeAndObjectMeta does not include labels
+			//!TODO: should upstream?
+			structural.Properties["metadata"].Properties["labels"] = structuralschemas.Structural{Generic: structuralschemas.Generic{Type: "object", AdditionalProperties: &structuralschemas.StructuralOrBool{Structural: &structuralschemas.Structural{Generic: structuralschemas.Generic{Type: "string"}}}}}
 
 			scopedTypeName := fmt.Sprintf("resourceType%d", time.Now().Nanosecond())
 			rt, err := celmodel.NewRuleTypes(scopedTypeName, structural, true, reg)
@@ -337,6 +363,10 @@ func (c *templateController) Validate(gvr metav1.GroupVersionResource, oldObj, o
 			}
 
 			registry := model.NewRegistry(env)
+
+			//!TODOL this compiler has a reference to the specific resource
+			// this is not desirable. would be nice if we could reuse the compiler
+			// but provide additional env for each compilation
 			info.compiler = compiler.NewCompiler(registry, lims)
 		}
 

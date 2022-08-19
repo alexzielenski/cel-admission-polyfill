@@ -7,6 +7,8 @@ import (
 	"github.com/google/cel-policy-templates-go/policy/model"
 	"github.com/google/cel-policy-templates-go/policy/parser"
 	metav1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
 )
 
 type HackyTermMap struct {
@@ -79,9 +81,14 @@ func PolicyTemplateToCELPolicyTemplate(template *PolicyTemplate) (*model.Source,
 		"validator": template.Validator,
 	}
 
+	scheme := runtime.NewScheme()
+	AddToScheme(scheme)
+
+	serializer.NewCodecFactory(scheme)
+
 	wipeZeroes(reformatted)
 
-	yamled, err := json.MarshalIndent(reformatted, "", "    ")
+	yamled, err := json.Marshal(reformatted)
 	if err != nil {
 		return nil, nil, err
 	}
