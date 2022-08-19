@@ -170,6 +170,9 @@ func TestBasic(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "testobject",
 			Namespace: "default",
+			Labels: map[string]string{
+				"ssh": "enabled",
+			},
 		},
 	}
 
