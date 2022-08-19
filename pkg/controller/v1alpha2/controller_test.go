@@ -162,7 +162,7 @@ func TestBasic(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Check rule is enforced
-	bunoin := testdata.BasicUnion{
+	bunoin := &testdata.BasicUnion{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "stable.example.com/v1",
 			Kind:       "BasicUnion",

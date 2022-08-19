@@ -66,6 +66,7 @@ github.com/google/cel-go/parser
 github.com/google/cel-go/parser/gen
 # github.com/google/cel-policy-templates-go v0.1.4
 ## explicit; go 1.17
+github.com/google/cel-policy-templates-go/policy
 github.com/google/cel-policy-templates-go/policy/compiler
 github.com/google/cel-policy-templates-go/policy/limits
 github.com/google/cel-policy-templates-go/policy/model

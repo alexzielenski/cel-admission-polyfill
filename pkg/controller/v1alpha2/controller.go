@@ -10,11 +10,8 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/checker/decls"
-	"github.com/google/cel-policy-templates-go/policy/compiler"
-	"github.com/google/cel-policy-templates-go/policy/limits"
+	"github.com/google/cel-policy-templates-go/policy"
 	"github.com/google/cel-policy-templates-go/policy/model"
-	"github.com/google/cel-policy-templates-go/policy/parser"
-	"github.com/google/cel-policy-templates-go/policy/runtime"
 	expr "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
 
 	"github.com/alexzielenski/cel_polyfill/pkg/apis/celadmissionpolyfill.k8s.io/v1alpha2"
@@ -23,14 +20,16 @@ import (
 	"github.com/alexzielenski/cel_polyfill/pkg/validator"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	structuralschemas "k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
+	kcel "k8s.io/apiextensions-apiserver/pkg/apiserver/schema/cel"
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/cel/library"
 	celmodel "k8s.io/apiextensions-apiserver/third_party/forked/celopenapi/model"
 
-	structuralschemas "k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime"
+	runtimeschema "k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
@@ -45,11 +44,32 @@ func NewPolicyTemplateController(
 	structuralSchemaController structuralschema.Controller,
 	crdClient apiextensionsclientset.Interface,
 ) controller.Interface {
+	var propDecls []*expr.Decl
+
+	// Resource type is determined at runtime rather than compile time
+	propDecls = append(propDecls, decls.NewVar("resource", celmodel.DynType.ExprType()))
+
+	var opts []cel.EnvOption
+	opts = append(opts, cel.Declarations(propDecls...), cel.HomogeneousAggregateLiterals())
+	opts = append(opts, library.ExtensionLibs...)
+
+	env, err := cel.NewEnv(opts...)
+	if err != nil {
+		// why can this return a nerr
+		panic(err)
+	}
+
+	engine, err := policy.NewEngine(policy.StandardExprEnv(env))
+	if err != nil {
+		// why can this return a nerr
+		panic(err)
+	}
 
 	result := &templateController{
 		structuralSchemaController: structuralSchemaController,
 		crdClient:                  crdClient,
 		dynamicClient:              dynamicClient,
+		policyEngine:               engine,
 		templates:                  make(map[string]templateInfo),
 	}
 	result.policyTemplatesController = controller.New(
@@ -71,6 +91,8 @@ type templateController struct {
 	// map of policy template name
 	templates map[string]templateInfo
 
+	policyEngine *policy.Engine
+
 	runningContext context.Context
 }
 
@@ -86,16 +108,8 @@ func (t *templateController) GetNumberInstances(templateName string) int {
 }
 
 type templateInfo struct {
-	template *v1alpha2.PolicyTemplate
-
-	// map from resource to compiled policy template for that resource
-	//!TODO: whenever underlying CRD schema is changed this needs to be wiped
-	//!TODO: whenever underlying policy changes this needs to be wiped
-	compiledTemplates map[metav1.GroupVersionResource]*runtime.Template
-
+	template  *v1alpha2.PolicyTemplate
 	instances map[string]instanceInfo
-
-	compiler *compiler.Compiler
 
 	// Stops this template watching for instances
 	cancelFunc func()
@@ -129,6 +143,7 @@ func (c *templateController) reconcilePolicyTemplate(
 
 		//!TODO: Remove this template from the policy engine as well
 		// as any of its instances
+		panic("deletion not implemented")
 		return nil
 	}
 
@@ -210,18 +225,34 @@ func (c *templateController) reconcilePolicyTemplate(
 		return nil
 	}
 
+	// Compile template and throw it into the env
+	source, _, err := v1alpha2.PolicyTemplateToCELPolicyTemplate(template)
+	if err != nil {
+		utilruntime.HandleError(err)
+		return nil
+	}
+	compiledTemplate, issues := c.policyEngine.CompileTemplate(source)
+	if issues != nil {
+		utilruntime.HandleError(issues.Err())
+		return nil
+	}
+
 	c.lock.Lock()
 	defer c.lock.Unlock()
+
+	err = c.policyEngine.SetTemplate(template.Name, compiledTemplate)
+	if err != nil {
+		utilruntime.HandleError(err)
+		return nil
+	}
 
 	// Make sure we have an instance watcher for this CRD
 	if _, exists := c.templates[template.Name]; !exists {
 		instanceContext, instanceCancel := context.WithCancel(c.runningContext)
 		c.templates[template.Name] = templateInfo{
-			cancelFunc:        instanceCancel,
-			instances:         make(map[string]instanceInfo),
-			template:          template,
-			compiler:          nil,
-			compiledTemplates: make(map[metav1.GroupVersionResource]*runtime.Template),
+			cancelFunc: instanceCancel,
+			instances:  make(map[string]instanceInfo),
+			template:   template,
 		}
 
 		// Watch for new instances of this policy
@@ -230,7 +261,7 @@ func (c *templateController) reconcilePolicyTemplate(
 			Version:  template.GroupVersionKind().Version,
 			Resource: template.Name,
 		}
-		informer := dynamicinformer.NewFilteredDynamicInformer(c.dynamicClient, schema.GroupVersionResource{
+		informer := dynamicinformer.NewFilteredDynamicInformer(c.dynamicClient, runtimeschema.GroupVersionResource{
 			Group:    instanceGVR.Group,
 			Version:  instanceGVR.Version,
 			Resource: instanceGVR.Resource,
@@ -244,9 +275,7 @@ func (c *templateController) reconcilePolicyTemplate(
 
 				if newObj == nil {
 					// Instance was removed
-					if info, exists := c.templates[template.Name]; exists {
-						delete(info.instances, name)
-					}
+					panic("deletion not implemented")
 				} else {
 					// Instance was added/updated
 					if templateInfo, exists := c.templates[template.Name]; exists {
@@ -257,6 +286,17 @@ func (c *templateController) reconcilePolicyTemplate(
 							return err
 						}
 
+						instanceSource := model.ByteSource(yamled, "")
+						compiled, issues := c.policyEngine.CompileInstance(instanceSource)
+						if issues != nil {
+							utilruntime.HandleError(issues.Err())
+							return nil
+						}
+						err = c.policyEngine.AddInstance(compiled)
+						if err != nil {
+							utilruntime.HandleError(err)
+							return err
+						}
 						templateInfo.instances[name] = instanceInfo{
 							compiled: nil,
 							raw:      string(yamled),
@@ -280,166 +320,142 @@ func (c *templateController) reconcilePolicyTemplate(
 }
 
 func (c *templateController) Validate(gvr metav1.GroupVersionResource, oldObj, obj interface{}) error {
+	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+	if err != nil {
+		utilruntime.HandleError(err)
+		return nil
+	}
+
 	//!TODO use RWMutex features
-	c.lock.Lock()
-	defer c.lock.Unlock()
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+
+	structural, err := c.structuralSchemaController.Get(gvr)
+	if err != nil {
+		utilruntime.HandleError(err)
+		return nil
+	}
+
+	structural = celmodel.WithTypeAndObjectMeta(structural)
+
+	// 	// WithTypeAndObjectMeta does not include labels
+	// 	//!TODO: should upstream?
+	structural.Properties["metadata"].Properties["labels"] = structuralschemas.Structural{Generic: structuralschemas.Generic{Type: "object", AdditionalProperties: &structuralschemas.StructuralOrBool{Structural: &structuralschemas.Structural{Generic: structuralschemas.Generic{Type: "string"}}}}}
+
+	decisions, err := c.policyEngine.EvalAll(map[string]interface{}{
+		"resource": kcel.UnstructuredToVal(obj, structural),
+	})
+	if err != nil {
+		utilruntime.HandleError(err)
+		return nil
+	}
+
+	println(decisions)
 
 	// Loop through all policies
 	//	Compile for this resource
 	// Loop through all instances of all policies
 	//	Also compile for this resource? (dont think so?)
 	// Evaluate in runtime
-	for _, info := range c.templates {
-		// Compiler gets wiped whenever CRD changes
-		// Since "resource" is part of env which is used in compiler constructor
-		//!TODO: Can this be changed so we can reused compiler with different envs?
-		if info.compiler == nil {
-			// Create type adaptor for the custom schema type
+	// for _, info := range c.templates {
+	// template, exists := info.runtimeTemplates[gvr]
+	// if !exists {
+	// 	env, err := cel.NewEnv()
+	// 	if err != nil {
+	// 		// Processing the template again won't solve this error
+	// 		utilruntime.HandleError(err)
+	// 		return nil
+	// 	}
 
-			lims := limits.NewLimits()
-			env, err := cel.NewEnv(
-				// TODO: this breaks the ability to use output message and details
-				// TODO: should output be added to the schema rather than raw extension?
-				cel.HomogeneousAggregateLiterals(),
-			)
-			if err != nil {
-				// Processing the template again won't solve this error
-				utilruntime.HandleError(err)
-				return nil
-			}
+	// 	// create new registrry which is now aware of the type of
+	// 	// resource
+	// 	reg := celmodel.NewRegistry(env)
 
-			reg := celmodel.NewRegistry(env)
+	// 	// Add the target CRD definition to the env
+	// 	//!TODO: is there a way to do this so we can share the compiler for
+	// 	// all types, and only use the env while compiling specific templates
+	// 	// or instances?
 
-			// Add the target CRD definition to the env
-			//!TODO: is there a way to do this so we can share the compiler for
-			// all types, and only use the env while compiling specific templates
-			// or instances?
-			structural, err := c.structuralSchemaController.Get(gvr)
-			if err != nil {
-				utilruntime.HandleError(err)
-				return nil
-			}
+	// 	scopedTypeName := fmt.Sprintf("resourceType%d", time.Now().Nanosecond())
+	// 	rt, err := celmodel.NewRuleTypes(scopedTypeName, structural, true, reg)
+	// 	if err != nil {
+	// 		utilruntime.HandleError(err)
+	// 		return nil
+	// 	}
 
-			structural = celmodel.WithTypeAndObjectMeta(structural)
+	// 	opts, err := rt.EnvOptions(env.TypeProvider())
+	// 	if err != nil {
+	// 		utilruntime.HandleError(err)
+	// 		return nil
+	// 	}
 
-			// WithTypeAndObjectMeta does not include labels
-			//!TODO: should upstream?
-			structural.Properties["metadata"].Properties["labels"] = structuralschemas.Structural{Generic: structuralschemas.Generic{Type: "object", AdditionalProperties: &structuralschemas.StructuralOrBool{Structural: &structuralschemas.Structural{Generic: structuralschemas.Generic{Type: "string"}}}}}
+	// 	// wipe out the "rule" option (is supplied by the template)
+	// 	opts = opts[:len(opts)-1]
 
-			scopedTypeName := fmt.Sprintf("resourceType%d", time.Now().Nanosecond())
-			rt, err := celmodel.NewRuleTypes(scopedTypeName, structural, true, reg)
-			if err != nil {
-				utilruntime.HandleError(err)
-				return nil
-			}
+	// 	root, ok := rt.FindDeclType(scopedTypeName)
+	// 	if !ok {
+	// 		rootDecl := celmodel.SchemaDeclType(structural, true)
+	// 		if rootDecl == nil {
+	// 			return nil
+	// 		}
 
-			opts, err := rt.EnvOptions(env.TypeProvider())
-			if err != nil {
-				utilruntime.HandleError(err)
-				return nil
-			}
+	// 		root = rootDecl.MaybeAssignTypeName(scopedTypeName)
+	// 	}
 
-			// wipe out the "rule" option
-			opts = opts[:len(opts)-1]
+	// 	var propDecls []*expr.Decl
 
-			root, ok := rt.FindDeclType(scopedTypeName)
-			if !ok {
-				rootDecl := celmodel.SchemaDeclType(structural, true)
-				if rootDecl == nil {
-					return nil
-				}
+	// 	// Resource type is determined at runtime rather than compile time
+	// 	propDecls = append(propDecls, decls.NewVar("resource", root.ExprType()))
+	// 	opts = append(opts, cel.Declarations(propDecls...), cel.HomogeneousAggregateLiterals())
+	// 	opts = append(opts, library.ExtensionLibs...)
+	// 	env, err = env.Extend(opts...)
+	// 	if err != nil {
+	// 		utilruntime.HandleError(err)
+	// 		continue
+	// 	}
 
-				root = rootDecl.MaybeAssignTypeName(scopedTypeName)
-			}
+	// 	registry := model.NewRegistry(env)
 
-			var propDecls []*expr.Decl
-			propDecls = append(propDecls, decls.NewVar("resource", root.ExprType()))
-			opts = append(opts, cel.Declarations(propDecls...), cel.HomogeneousAggregateLiterals())
-			opts = append(opts, library.ExtensionLibs...)
-			env, err = env.Extend(opts...)
-			if err != nil {
-				utilruntime.HandleError(err)
-				continue
-			}
+	// 	// Set a default environment
+	// 	registry.SetEnv("", model.NewEnv(""))
 
-			registry := model.NewRegistry(env)
+	// 	template, err = runtime.NewTemplate(registry, info.compiledTemplate)
+	// 	if err != nil {
+	// 		utilruntime.HandleError(err)
+	// 		continue
+	// 	}
 
-			//!TODOL this compiler has a reference to the specific resource
-			// this is not desirable. would be nice if we could reuse the compiler
-			// but provide additional env for each compilation
-			info.compiler = compiler.NewCompiler(registry, lims)
-		}
+	// 	info.runtimeTemplates[gvr] = template
+	// }
 
-		// Check if template is compiler for this GVR
-		template, exists := info.compiledTemplates[gvr]
-		if !exists {
-			// Fetch structural schema for this GVR, turn it into a decl type or whatever
-			// Add resource to it
-			// vendor/k8s.io/apiextensions-apiserver/pkg/apiserver/schema/cel/compilation.go
-			// for example
-			// see env.Extend with Decl opts
+	// Recompile any instances
 
-			//!TODO: only lazily compile template if there is a matching instance?
-			// Convert input template into a model.Value
-			// TODO: where does structural Schema fit into this? seems like cel-policy-templates
-			// handles openapi schemas itself? How does that fit within k8s? Does it matter?
-			// What did k8s cel lib provide that we are missing if using cel-policy-templates directly
-			//
-			//
-			// Below code is not working. When compiling required_labels template,
-			// Undeclared reference to "resource" and "rule"
-			// 	or "rule.labels" (part of rule schema)
-			// 	as well as terms defined within template such as "want"
-			source, celConversion, err := v1alpha2.PolicyTemplateToCELPolicyTemplate(info.template)
-			if err != nil {
-				// Processing the template again won't solve this error
-				utilruntime.HandleError(err)
-				return nil
-			}
+	// 	for _, instance := range info.instances {
+	// 		if instance.compiled == nil {
+	// 			source := model.StringSource(instance.raw, "")
+	// 			parsed, issues := parser.ParseYaml(source)
+	// 			if issues != nil {
+	// 				utilruntime.HandleError(issues.Err())
+	// 				continue
+	// 			}
+	// 			compiledInstance, issues := info.compiler.CompileInstance(source, parsed)
+	// 			if issues != nil {
+	// 				utilruntime.HandleError(issues.Err())
+	// 				continue
+	// 			}
 
-			modelTemplate, issues := info.compiler.CompileTemplate(source, celConversion)
-			if issues != nil {
-				utilruntime.HandleError(issues.Err())
-				return nil
-			}
+	// 			instance.compiled = compiledInstance
+	// 		}
 
-			template, err = runtime.NewTemplate(nil, modelTemplate)
-			if err != nil {
-				utilruntime.HandleError(err)
-				continue
-			}
+	// 		decisions, err := template.Eval(instance.compiled, nil, nil)
+	// 		if err != nil {
+	// 			utilruntime.HandleError(err)
+	// 			continue
+	// 		}
 
-			info.compiledTemplates[gvr] = template
-		}
-
-		// Recompile any instances
-
-		for _, instance := range info.instances {
-			if instance.compiled == nil {
-				source := model.StringSource(instance.raw, "")
-				parsed, issues := parser.ParseYaml(source)
-				if issues != nil {
-					utilruntime.HandleError(issues.Err())
-					continue
-				}
-				compiledInstance, issues := info.compiler.CompileInstance(source, parsed)
-				if issues != nil {
-					utilruntime.HandleError(issues.Err())
-					continue
-				}
-
-				instance.compiled = compiledInstance
-			}
-
-			decisions, err := template.Eval(instance.compiled, nil, nil)
-			if err != nil {
-				utilruntime.HandleError(err)
-				continue
-			}
-
-			println(decisions)
-		}
-	}
+	// 		println(decisions)
+	// 	}
+	// }
 
 	return nil
 }
