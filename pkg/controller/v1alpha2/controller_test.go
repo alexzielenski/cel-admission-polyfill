@@ -13,17 +13,33 @@ import (
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/fake"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions"
 
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/wait"
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 
 	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 	apiextensionsinformers "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 )
 
 func TestBasic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	scheme := runtime.NewScheme()
+	scheme.AddKnownTypeWithName(schema.GroupVersionKind{Group: "celadmissionpolyfill.k8s.io", Version: "v1alpha2", Kind: "required_labels"}, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(schema.GroupVersionKind{Group: "celadmissionpolyfill.k8s.io", Version: "v1alpha2", Kind: "required_labelsList"}, &unstructured.UnstructuredList{})
 
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+		{
+			Group:    "celadmissionpolyfill.k8s.io",
+			Version:  "v1alpha2",
+			Resource: "required_labels",
+		}: "required_labelsList",
+	})
 	client := fake.NewSimpleClientset()
 	fakeext := apiextensionsfake.NewSimpleClientset()
 
@@ -35,6 +51,7 @@ func TestBasic(t *testing.T) {
 	)
 
 	controller := controllerv1alpha2.NewPolicyTemplateController(
+		dynamicClient,
 		factory.Celadmissionpolyfill().V1alpha2().PolicyTemplates().Informer(),
 		structuralschemaController,
 		fakeext,
@@ -71,30 +88,51 @@ func TestBasic(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 
+	err = wait.PollWithContext(ctx, 30*time.Millisecond, 1*time.Hour, func(ctx context.Context) (done bool, err error) {
+		// Wait until CRD pops up
+		obj, err := fakeext.ApiextensionsV1().CustomResourceDefinitions().Get(
+			ctx,
+			"required_labels.celadmissionpolyfill.k8s.io",
+			metav1.GetOptions{},
+		)
+
+		if err != nil {
+			if errors.IsNotFound(err) {
+				return false, nil
+			}
+			return false, err
+		}
+
+		return obj != nil, nil
+	})
+
 	// Check that CRD is created
-	<-ctx.Done()
-	// err = wait.PollWithContext(ctx, 30*time.Millisecond, 1*time.Hour, func(ctx context.Context) (done bool, err error) {
-	// 	// Wait until CRD pops up
-	// 	obj, err := fakeext.ApiextensionsV1().CustomResourceDefinitions().Get(
-	// 		ctx,
-	// 		"required_labels.celadmissionpolyfill.k8s.io",
-	// 		metav1.GetOptions{},
-	// 	)
-
-	// 	if err != nil {
-	// 		if errors.IsNotFound(err) {
-	// 			return false, nil
-	// 		}
-	// 		return false, err
-	// 	}
-
-	// 	return obj != nil, nil
-	// })
-
-	// if err != nil {
-	// 	t.Fatalf(err.Error())
-	// }
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 
 	// Create instance of policy
+	file, err = ioutil.ReadFile("testdata/required_labels/instance.yaml")
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	instance := &unstructured.Unstructured{}
+	decoder = yamlutil.NewYAMLOrJSONDecoder(bytes.NewReader(file), 24)
+	err = decoder.Decode(instance)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	_, err = dynamicClient.Resource(schema.GroupVersionResource{
+		Group:    instance.GroupVersionKind().Group,
+		Version:  instance.GroupVersionKind().Version,
+		Resource: "required_labels",
+	}).Namespace(instance.GetNamespace()).Create(ctx, instance, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	<-ctx.Done()
 	// Check rule is enforced
 }
