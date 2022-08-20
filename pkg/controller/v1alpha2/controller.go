@@ -50,7 +50,10 @@ func NewPolicyTemplateController(
 	propDecls = append(propDecls, decls.NewVar("resource", celmodel.DynType.ExprType()))
 
 	var opts []cel.EnvOption
-	opts = append(opts, cel.Declarations(propDecls...), cel.HomogeneousAggregateLiterals())
+	opts = append(opts, cel.Declarations(propDecls...))
+	// cel.HomogeneousAggregateLiterals() makes `output.details.data` type
+	// validation fail since sibling `output.message` key is a string (and details is a map)
+	// opts = append(opts, cel.HomogeneousAggregateLiterals())
 	opts = append(opts, library.ExtensionLibs...)
 
 	env, err := cel.NewEnv(opts...)
@@ -340,7 +343,15 @@ func (c *templateController) Validate(gvr metav1.GroupVersionResource, oldObj, o
 
 	// 	// WithTypeAndObjectMeta does not include labels
 	// 	//!TODO: should upstream?
-	structural.Properties["metadata"].Properties["labels"] = structuralschemas.Structural{Generic: structuralschemas.Generic{Type: "object", AdditionalProperties: &structuralschemas.StructuralOrBool{Structural: &structuralschemas.Structural{Generic: structuralschemas.Generic{Type: "string"}}}}}
+	structural.Properties["metadata"].Properties["labels"] =
+		structuralschemas.Structural{
+			Generic: structuralschemas.Generic{
+				Type: "object",
+				AdditionalProperties: &structuralschemas.StructuralOrBool{
+					Structural: &structuralschemas.Structural{Generic: structuralschemas.Generic{Type: "string"}},
+				},
+			},
+		}
 
 	decisions, err := c.policyEngine.EvalAll(map[string]interface{}{
 		"resource": kcel.UnstructuredToVal(obj, structural),
@@ -350,112 +361,11 @@ func (c *templateController) Validate(gvr metav1.GroupVersionResource, oldObj, o
 		return nil
 	}
 
-	println(decisions)
-
-	// Loop through all policies
-	//	Compile for this resource
-	// Loop through all instances of all policies
-	//	Also compile for this resource? (dont think so?)
-	// Evaluate in runtime
-	// for _, info := range c.templates {
-	// template, exists := info.runtimeTemplates[gvr]
-	// if !exists {
-	// 	env, err := cel.NewEnv()
-	// 	if err != nil {
-	// 		// Processing the template again won't solve this error
-	// 		utilruntime.HandleError(err)
-	// 		return nil
-	// 	}
-
-	// 	// create new registrry which is now aware of the type of
-	// 	// resource
-	// 	reg := celmodel.NewRegistry(env)
-
-	// 	// Add the target CRD definition to the env
-	// 	//!TODO: is there a way to do this so we can share the compiler for
-	// 	// all types, and only use the env while compiling specific templates
-	// 	// or instances?
-
-	// 	scopedTypeName := fmt.Sprintf("resourceType%d", time.Now().Nanosecond())
-	// 	rt, err := celmodel.NewRuleTypes(scopedTypeName, structural, true, reg)
-	// 	if err != nil {
-	// 		utilruntime.HandleError(err)
-	// 		return nil
-	// 	}
-
-	// 	opts, err := rt.EnvOptions(env.TypeProvider())
-	// 	if err != nil {
-	// 		utilruntime.HandleError(err)
-	// 		return nil
-	// 	}
-
-	// 	// wipe out the "rule" option (is supplied by the template)
-	// 	opts = opts[:len(opts)-1]
-
-	// 	root, ok := rt.FindDeclType(scopedTypeName)
-	// 	if !ok {
-	// 		rootDecl := celmodel.SchemaDeclType(structural, true)
-	// 		if rootDecl == nil {
-	// 			return nil
-	// 		}
-
-	// 		root = rootDecl.MaybeAssignTypeName(scopedTypeName)
-	// 	}
-
-	// 	var propDecls []*expr.Decl
-
-	// 	// Resource type is determined at runtime rather than compile time
-	// 	propDecls = append(propDecls, decls.NewVar("resource", root.ExprType()))
-	// 	opts = append(opts, cel.Declarations(propDecls...), cel.HomogeneousAggregateLiterals())
-	// 	opts = append(opts, library.ExtensionLibs...)
-	// 	env, err = env.Extend(opts...)
-	// 	if err != nil {
-	// 		utilruntime.HandleError(err)
-	// 		continue
-	// 	}
-
-	// 	registry := model.NewRegistry(env)
-
-	// 	// Set a default environment
-	// 	registry.SetEnv("", model.NewEnv(""))
-
-	// 	template, err = runtime.NewTemplate(registry, info.compiledTemplate)
-	// 	if err != nil {
-	// 		utilruntime.HandleError(err)
-	// 		continue
-	// 	}
-
-	// 	info.runtimeTemplates[gvr] = template
-	// }
-
-	// Recompile any instances
-
-	// 	for _, instance := range info.instances {
-	// 		if instance.compiled == nil {
-	// 			source := model.StringSource(instance.raw, "")
-	// 			parsed, issues := parser.ParseYaml(source)
-	// 			if issues != nil {
-	// 				utilruntime.HandleError(issues.Err())
-	// 				continue
-	// 			}
-	// 			compiledInstance, issues := info.compiler.CompileInstance(source, parsed)
-	// 			if issues != nil {
-	// 				utilruntime.HandleError(issues.Err())
-	// 				continue
-	// 			}
-
-	// 			instance.compiled = compiledInstance
-	// 		}
-
-	// 		decisions, err := template.Eval(instance.compiled, nil, nil)
-	// 		if err != nil {
-	// 			utilruntime.HandleError(err)
-	// 			continue
-	// 		}
-
-	// 		println(decisions)
-	// 	}
-	// }
+	if len(decisions) > 0 {
+		err := fmt.Errorf("failed with decisions: %v", decisions)
+		utilruntime.HandleError(err)
+		return err
+	}
 
 	return nil
 }

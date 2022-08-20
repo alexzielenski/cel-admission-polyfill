@@ -109,7 +109,7 @@ func TestBasic(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 
-	err = wait.PollWithContext(ctx, 30*time.Millisecond, 1*time.Second, func(ctx context.Context) (done bool, err error) {
+	err = wait.PollWithContext(ctx, 30*time.Millisecond, 2*time.Second, func(ctx context.Context) (done bool, err error) {
 		// Wait until CRD pops up
 		obj, err := fakeext.ApiextensionsV1().CustomResourceDefinitions().Get(
 			ctx,
@@ -162,7 +162,13 @@ func TestBasic(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Check rule is enforced
-	bunoin := &testdata.BasicUnion{
+	gvr := metav1.GroupVersionResource{
+		Group:    "stable.example.com",
+		Version:  "v1",
+		Resource: "basicunions",
+	}
+
+	err = controller.Validate(gvr, nil, &testdata.BasicUnion{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "stable.example.com/v1",
 			Kind:       "BasicUnion",
@@ -171,14 +177,50 @@ func TestBasic(t *testing.T) {
 			Name:      "testobject",
 			Namespace: "default",
 			Labels: map[string]string{
-				"ssh": "enabled",
+				"ssh":      "enabled",
+				"env":      "prod",
+				"verified": "true",
 			},
 		},
-	}
-
-	err = controller.Validate(metav1.GroupVersionResource(bunoin.GroupVersionKind().GroupVersion().WithResource("basicunions")), nil, bunoin)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	<-ctx.Done()
+
+	err = controller.Validate(gvr, nil, &testdata.BasicUnion{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "stable.example.com/v1",
+			Kind:       "BasicUnion",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "testobject",
+			Namespace: "default",
+			Labels: map[string]string{
+				"ssh":      "enabled",
+				"env":      "prov",
+				"verified": "true",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	err = controller.Validate(gvr, nil, &testdata.BasicUnion{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "stable.example.com/v1",
+			Kind:       "BasicUnion",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "testobject",
+			Namespace: "default",
+			Labels: map[string]string{
+				"ssh":      "enabled",
+				"verified": "true",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
 }

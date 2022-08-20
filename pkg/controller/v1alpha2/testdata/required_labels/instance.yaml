@@ -21,4 +21,4 @@ rules:
   - labels:
       env: prod
       ssh: enabled
-      verified: true
+      verified: 'true'
