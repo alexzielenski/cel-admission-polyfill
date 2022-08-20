@@ -10,17 +10,21 @@ import (
 
 	"github.com/alexzielenski/cel_polyfill/pkg/controller/structuralschema"
 	controllerv1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/controller/v1alpha1"
+	controllerv1alpha2 "github.com/alexzielenski/cel_polyfill/pkg/controller/v1alpha2"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/scheme"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions"
+	"github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions/celadmissionpolyfill.k8s.io/v1alpha1"
 	"github.com/alexzielenski/cel_polyfill/pkg/validator"
 	"github.com/alexzielenski/cel_polyfill/pkg/webhook"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apiextensionsclientsetscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
 	apiextensionsinformers "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 )
@@ -51,6 +55,12 @@ func main() {
 		return
 	}
 
+	dynamicClient, err := dynamic.NewForConfig(restConfig)
+	if err != nil {
+		klog.Errorf("Failed to create dynamic client: %v", err)
+		return
+	}
+
 	customClient, err := versioned.NewForConfig(restConfig)
 	if err != nil {
 		klog.Errorf("Failed to create crd client: %v", err)
@@ -75,12 +85,27 @@ func main() {
 	structuralschemaController := structuralschema.NewController(
 		apiextensionsFactory.Apiextensions().V1().CustomResourceDefinitions().Informer(),
 	)
-	validator := validator.New(structuralschemaController)
+
+	// should by called by each worker when it has finished cleaning up
+	// main function blocks on each worker being done
+	cleanupWorker := func() {
+		// Inform all other workers they should begin clean up if they have not
+		serverCancel()
+
+		// Decrement wait counter for main thread
+		waitGroup.Done()
+	}
+
+	waitGroup.Add(2)
+	validators := []validator.Interface{
+		StartV1Alpha1(serverContext, cleanupWorker, structuralschemaController, customFactory.Celadmissionpolyfill().V1alpha1().ValidationRuleSets()),
+		StartV1Alpha2(serverContext, cleanupWorker, dynamicClient, apiextensionsClient, structuralschemaController, customFactory.Celadmissionpolyfill().V1alpha2().PolicyTemplates().Informer()),
+	}
 
 	// Start HTTP REST server for webhook
 	waitGroup.Add(1)
 	go func() {
-		webhook := webhook.New(locateCertificates(), validator)
+		webhook := webhook.New(locateCertificates(), validator.NewMulti(validators...))
 
 		// Set up bindings with cluster automatically if debugging
 		if DEBUG {
@@ -98,33 +123,7 @@ func main() {
 		klog.Infof("server closure reason: %v", cancellationReason)
 
 		// Cancel the server context to stop other workers
-		serverCancel()
-		waitGroup.Done()
-	}()
-
-	// call outside of goroutine so that informer is requested before we start
-	// factory. (for some reason factory doesn't start informers requested
-	// after it was already started?)
-	admissionRulesController := controllerv1alpha1.NewAdmissionRulesController(
-		customFactory.Celadmissionpolyfill().V1alpha1().ValidationRuleSets(),
-		validator,
-	)
-
-	waitGroup.Add(1)
-	go func() {
-		// Start k8s operator for digesting validation configuration
-
-		if DEBUG {
-			// Install CR Definiitons for our types
-			klog.Info("updated CR definition")
-			// admissionRulesController.Install()
-		}
-
-		cancellationReason := admissionRulesController.Run(serverContext)
-		klog.Infof("controller closure reason: %v", cancellationReason)
-
-		serverCancel()
-		waitGroup.Done()
+		cleanupWorker()
 	}()
 
 	// Start after informers have been requested from factory
@@ -171,10 +170,55 @@ func locateCertificates() webhook.CertInfo {
 	return webhook.CertInfo{}
 }
 
-func StartV1Alpha1() {
+func StartV1Alpha1(
+	ctx context.Context,
+	cancelFunc func(),
+	structuralschemaController structuralschema.Controller,
+	informer v1alpha1.ValidationRuleSetInformer,
+) validator.Interface {
+	validator := validator.New(structuralschemaController)
 
+	// call outside of goroutine so that informer is requested before we start
+	// factory. (for some reason factory doesn't start informers requested
+	// after it was already started?)
+	admissionRulesController := controllerv1alpha1.NewAdmissionRulesController(
+		informer,
+		validator,
+	)
+
+	go func() {
+		// Start k8s operator for digesting validation configuration
+		cancellationReason := admissionRulesController.Run(ctx)
+		klog.Infof("controller closure reason: %v", cancellationReason)
+
+		cancelFunc()
+	}()
+
+	return validator
 }
 
-func StartV1Alpha2() {
+func StartV1Alpha2(
+	ctx context.Context,
+	cancelFunc func(),
+	dynamicClient dynamic.Interface,
+	apiextensionsClient apiextensionsclientset.Interface,
+	structuralschemaController structuralschema.Controller,
+	policyTemplatesInformer cache.SharedIndexInformer,
+) validator.Interface {
+	controller := controllerv1alpha2.NewPolicyTemplateController(
+		dynamicClient,
+		policyTemplatesInformer,
+		structuralschemaController,
+		apiextensionsClient,
+	)
 
+	go func() {
+		// Start k8s operator for digesting validation configuration
+		cancellationReason := controller.Run(ctx)
+		klog.Infof("controller closure reason: %v", cancellationReason)
+
+		cancelFunc()
+	}()
+
+	return controller
 }

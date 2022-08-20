@@ -38,13 +38,19 @@ import (
 )
 
 var _ validator.Interface = &templateController{}
+var _ controller.Interface = &templateController{}
+
+type PolicyTemplateController interface {
+	controller.Interface
+	validator.Interface
+}
 
 func NewPolicyTemplateController(
 	dynamicClient dynamic.Interface,
 	policyTemplatesInformer cache.SharedIndexInformer,
 	structuralSchemaController structuralschema.Controller,
 	crdClient apiextensionsclientset.Interface,
-) controller.Interface {
+) PolicyTemplateController {
 	var propDecls []*expr.Decl
 
 	// Resource type is determined at runtime rather than compile time
