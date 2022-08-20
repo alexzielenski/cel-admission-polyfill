@@ -24,6 +24,7 @@ import (
 	kcel "k8s.io/apiextensions-apiserver/pkg/apiserver/schema/cel"
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/cel/library"
 	celmodel "k8s.io/apiextensions-apiserver/third_party/forked/celopenapi/model"
+	"k8s.io/klog/v2"
 
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -250,6 +251,8 @@ func (c *templateController) reconcilePolicyTemplate(
 		return nil
 	}
 
+	klog.Infof("created crd for policy: %s", crd.Name)
+
 	// Compile template and throw it into the env
 	source, _, err := v1alpha2.PolicyTemplateToCELPolicyTemplate(template)
 	if err != nil {
@@ -398,11 +401,11 @@ func (de DecisionError) Error() string {
 
 var _ error = DecisionError{}
 
-func (c *templateController) Validate(gvr metav1.GroupVersionResource, oldObj, obj interface{}) error {
+func (c *templateController) Validate(gvr metav1.GroupVersionResource, oldObj, obj interface{}) validator.ValidationResult {
 	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
 	if err != nil {
 		utilruntime.HandleError(err)
-		return nil
+		return validator.ValidationResult{Status: validator.ValidationInternalError, Error: err}
 	}
 
 	//!TODO use RWMutex features
@@ -412,7 +415,7 @@ func (c *templateController) Validate(gvr metav1.GroupVersionResource, oldObj, o
 	structural, err := c.structuralSchemaController.Get(gvr)
 	if err != nil {
 		utilruntime.HandleError(err)
-		return nil
+		return validator.ValidationResult{Status: validator.ValidationOK, Error: err}
 	}
 
 	structural = celmodel.WithTypeAndObjectMeta(structural)
@@ -434,14 +437,14 @@ func (c *templateController) Validate(gvr metav1.GroupVersionResource, oldObj, o
 	})
 	if err != nil {
 		utilruntime.HandleError(err)
-		return nil
+		return validator.ValidationResult{Status: validator.ValidationInternalError, Error: err}
 	}
 
 	if len(decisions) > 0 {
 		err := DecisionError{Decisions: decisions}
 		utilruntime.HandleError(err)
-		return err
+		return validator.ValidationResult{Status: validator.ValidationForbidden, Error: err}
 	}
 
-	return nil
+	return validator.ValidationResult{Status: validator.ValidationOK}
 }

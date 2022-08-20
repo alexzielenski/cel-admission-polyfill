@@ -103,7 +103,7 @@ func New(
 	}
 }
 
-func (v *validator) Validate(gvr metav1.GroupVersionResource, oldObj, obj interface{}) error {
+func (v *validator) Validate(gvr metav1.GroupVersionResource, oldObj, obj interface{}) ValidationResult {
 	// 1. Find rules which match against this object
 	// 2. Find compiled CEL rules for this object's type. If not yet
 	//	seen, compile for this type and save.
@@ -115,7 +115,7 @@ func (v *validator) Validate(gvr metav1.GroupVersionResource, oldObj, obj interf
 	// ended up being a match for this gvk among the registered rules
 	structural, err := v.structuralSchemaController.Get(gvr)
 	if err != nil {
-		return err
+		return ValidationResult{Status: ValidationOK}
 	}
 
 	v.lock.Lock()
@@ -206,10 +206,13 @@ func (v *validator) Validate(gvr metav1.GroupVersionResource, oldObj, obj interf
 			klog.Error(e)
 		}
 
-		return failures.ToAggregate()
+		return ValidationResult{
+			Status: ValidationForbidden,
+			Error:  failures.ToAggregate(),
+		}
 	}
 
-	return nil
+	return ValidationResult{Status: ValidationOK}
 }
 
 func (v *validator) AddRuleSet(ruleSet *polyfillv1.ValidationRuleSet) {

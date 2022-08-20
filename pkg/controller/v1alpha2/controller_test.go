@@ -42,8 +42,8 @@ func TestBasic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	scheme := runtime.NewScheme()
-	scheme.AddKnownTypeWithName(schema.GroupVersionKind{Group: "celadmissionpolyfill.k8s.io", Version: "v1alpha2", Kind: "required_labels"}, &unstructured.Unstructured{})
-	scheme.AddKnownTypeWithName(schema.GroupVersionKind{Group: "celadmissionpolyfill.k8s.io", Version: "v1alpha2", Kind: "required_labelsList"}, &unstructured.UnstructuredList{})
+	scheme.AddKnownTypeWithName(schema.GroupVersionKind{Group: "policy.acme.co", Version: "v1", Kind: "requiredlabels"}, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(schema.GroupVersionKind{Group: "policy.acme.co", Version: "v1", Kind: "requiredlabelsList"}, &unstructured.UnstructuredList{})
 
 	crd := &apiextensionsv1.CustomResourceDefinition{}
 	file, err := ioutil.ReadFile("testdata/stable.example.com_basicunions.yaml")
@@ -58,9 +58,9 @@ func TestBasic(t *testing.T) {
 
 	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
 		{
-			Group:    "celadmissionpolyfill.k8s.io",
-			Version:  "v1alpha2",
-			Resource: "required_labels",
+			Group:    "policy.acme.co",
+			Version:  "v1",
+			Resource: "requiredlabels",
 		}: "required_labelsList",
 	})
 	client := fake.NewSimpleClientset()
@@ -111,11 +111,11 @@ func TestBasic(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 
-	err = wait.PollWithContext(ctx, 30*time.Millisecond, 1*time.Second, func(ctx context.Context) (done bool, err error) {
+	err = wait.PollWithContext(ctx, 30*time.Millisecond, 2*time.Hour, func(ctx context.Context) (done bool, err error) {
 		// Wait until CRD pops up
 		obj, err := fakeext.ApiextensionsV1().CustomResourceDefinitions().Get(
 			ctx,
-			"required_labels.celadmissionpolyfill.k8s.io",
+			"requiredlabels.policy.acme.co",
 			metav1.GetOptions{},
 		)
 
@@ -158,7 +158,7 @@ func TestBasic(t *testing.T) {
 
 	// wait until policy is instantiated
 	err = wait.PollWithContext(ctx, 30*time.Millisecond, 1*time.Second, func(ctx context.Context) (done bool, err error) {
-		return controller.GetNumberInstances("required_labels") > 0, nil
+		return controller.GetNumberInstances("requiredlabels") > 0, nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +170,7 @@ func TestBasic(t *testing.T) {
 		Resource: "basicunions",
 	}
 
-	err = controller.Validate(gvr, nil, &testdata.BasicUnion{
+	verr := controller.Validate(gvr, nil, &testdata.BasicUnion{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "stable.example.com/v1",
 			Kind:       "BasicUnion",
@@ -185,11 +185,11 @@ func TestBasic(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
+	if verr.Status != validator.ValidationOK {
+		t.Fatal(verr)
 	}
 
-	err = controller.Validate(gvr, nil, &testdata.BasicUnion{
+	verr = controller.Validate(gvr, nil, &testdata.BasicUnion{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "stable.example.com/v1",
 			Kind:       "BasicUnion",
@@ -216,11 +216,11 @@ func TestBasic(t *testing.T) {
 			"message": "invalid values provided on one or more labels",
 		},
 	}
-	actual := err.(controllerv1alpha2.DecisionError).ErrorJSON()
+	actual := verr.Error.(controllerv1alpha2.DecisionError).ErrorJSON()
 	if !reflect.DeepEqual(expected, actual) {
 		t.Fatalf("%s", cmp.Diff(expected, actual))
 	}
-	err = controller.Validate(gvr, nil, &testdata.BasicUnion{
+	verr = controller.Validate(gvr, nil, &testdata.BasicUnion{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "stable.example.com/v1",
 			Kind:       "BasicUnion",
@@ -245,12 +245,12 @@ func TestBasic(t *testing.T) {
 			"message": "missing one or more required labels",
 		},
 	}
-	actual = err.(controllerv1alpha2.DecisionError).ErrorJSON()
+	actual = verr.Error.(controllerv1alpha2.DecisionError).ErrorJSON()
 	if !reflect.DeepEqual(expected, actual) {
 		t.Fatalf("%s", cmp.Diff(expected, actual))
 	}
 
-	err = controller.Validate(gvr, nil, &testdata.BasicUnion{
+	verr = controller.Validate(gvr, nil, &testdata.BasicUnion{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "stable.example.com/v1",
 			Kind:       "BasicUnion",
@@ -283,7 +283,7 @@ func TestBasic(t *testing.T) {
 			"message": "invalid values provided on one or more labels",
 		},
 	}
-	actual = err.(controllerv1alpha2.DecisionError).ErrorJSON()
+	actual = verr.Error.(controllerv1alpha2.DecisionError).ErrorJSON()
 	if !reflect.DeepEqual(expected, actual) {
 		t.Fatalf("%s", cmp.Diff(expected, actual))
 	}

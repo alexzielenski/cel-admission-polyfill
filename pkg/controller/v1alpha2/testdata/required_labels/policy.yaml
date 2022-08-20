@@ -38,13 +38,19 @@ spec:
         resource.metadata.labels.filter(l,
           l in want && want[l] != resource.metadata.labels[l])
     productions:
-      - match: missing.size() > 0
+      - match: '!has(resource.metadata.labels)'
+        decision: policy.violation
+        output:
+          message: missing labels field
+      - match: >
+          has(resource.metadata.labels) && missing.size() > 0
         decision: policy.violation
         output:
           message: missing one or more required labels
           details:
             data: missing
-      - match: invalid.size() > 0
+      - match: >
+          has(resource.metadata.labels) && invalid.size() > 0
         decision: policy.violation
         output:
           message: invalid values provided on one or more labels

@@ -38,12 +38,12 @@ func TestBasic(t *testing.T) {
 	structuralschemaController := structuralschema.NewController(
 		apiextensionsFactory.Apiextensions().V1().CustomResourceDefinitions().Informer(),
 	)
-	validator := validator.New(structuralschemaController)
+	vald := validator.New(structuralschemaController)
 
 	// Populates the validator with rule sets depending upon the CRD definition
 	controller := controllerv1alpha1.NewAdmissionRulesController(
 		factory.Celadmissionpolyfill().V1alpha1().ValidationRuleSets(),
-		validator,
+		vald,
 	)
 
 	factory.Start(ctx.Done())
@@ -130,7 +130,7 @@ func TestBasic(t *testing.T) {
 			t.Fatalf(err.Error())
 		}
 
-		err := validator.Validate(metav1.GroupVersionResource{
+		err := vald.Validate(metav1.GroupVersionResource{
 			Group:    "stable.example.com",
 			Version:  "v1",
 			Resource: "basicunions",
@@ -138,11 +138,13 @@ func TestBasic(t *testing.T) {
 
 		var returnedErrs []error
 
-		if err != nil {
-			if list, ok := err.(utilerrors.Aggregate); ok {
+		if err.Status != validator.ValidationOK {
+			if list, ok := err.Error.(utilerrors.Aggregate); ok {
 				returnedErrs = list.Errors()
+			} else if err.Error != nil {
+				returnedErrs = append(returnedErrs, err.Error)
 			} else {
-				returnedErrs = append(returnedErrs, err)
+				panic("status not OK but error nil?")
 			}
 		}
 

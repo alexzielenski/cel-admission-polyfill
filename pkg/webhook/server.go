@@ -178,11 +178,11 @@ func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	err = wh.validator.Validate(parsed.Request.Resource, &oldObject, &object)
-	allowed := err == nil || err.Error() != "validation failed"
+	verr := wh.validator.Validate(parsed.Request.Resource, &oldObject, &object)
+	allowed := verr.Status == validator.ValidationOK
 	errString := "valid"
-	if err != nil {
-		errString = err.Error()
+	if verr.Error != nil {
+		errString = verr.Error.Error()
 	}
 
 	var status int32 = http.StatusAccepted
