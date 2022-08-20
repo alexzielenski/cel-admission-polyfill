@@ -4,6 +4,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.9.2
+    "api-approved.kubernetes.io": "unapproved, experimental-only"
   creationTimestamp: null
   name: policytemplates.celadmissionpolyfill.k8s.io
 spec:
