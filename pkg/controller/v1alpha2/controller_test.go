@@ -197,7 +197,7 @@ func TestBasic(t *testing.T) {
 			Namespace: "default",
 			Labels: map[string]string{
 				"ssh":      "enabled",
-				"env":      "prov",
+				"env":      "invalid_value", // policy instance expects 'prod'
 				"verified": "true",
 			},
 		},
@@ -217,6 +217,7 @@ func TestBasic(t *testing.T) {
 			Labels: map[string]string{
 				"ssh":      "enabled",
 				"verified": "true",
+				// policy instance expects 'env': 'prod'
 			},
 		},
 	})
