@@ -55,7 +55,7 @@ spec:
                               decisionRef:
                                 type: string
                               output:
-                                type: object
+                                x-kubernetes-preserve-unknown-fields: true
                             required:
                             - output
                             type: object
@@ -63,7 +63,7 @@ spec:
                         match:
                           type: string
                         output:
-                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
                       type: object
                     type: array
                   ranges:
@@ -88,7 +88,7 @@ spec:
                           type: string
                         value:
                           description: '!TODO: evaluator requires this is a string'
-                          type: object
+                          type: string
                       required:
                       - name
                       - value
@@ -97,48 +97,15 @@ spec:
                     x-kubernetes-list-map-keys:
                     - name
                     x-kubernetes-list-type: map
+                required:
+                - productions
                 type: object
               pluralName:
                 type: string
               schema:
-                description: 'Copy-pasted from upstream cel-policy-template. Needed
-                  to add JSON tags to use with CRD generator. !TODO: Figure out if
-                  there is a way to reconcile this OpenAPI schema def with the upstream
-                  k8s version so a single type can be used. Converting different OpenAPI
-                  formats already is a huge perf hit in apiserver'
-                properties:
-                  $ref:
-                    type: string
-                  additionalProperties: {}
-                  default:
-                    x-kubernetes-preserve-unknown-fields: true
-                  description:
-                    type: string
-                  enum:
-                    items:
-                      x-kubernetes-preserve-unknown-fields: true
-                    type: array
-                  format:
-                    type: string
-                  items: {}
-                  metadata:
-                    additionalProperties:
-                      type: string
-                    type: object
-                  properties:
-                    additionalProperties: {}
-                    type: object
-                  required:
-                    items:
-                      type: string
-                    type: array
-                  title:
-                    type: string
-                  type:
-                    type: string
-                  type_param:
-                    type: string
-                type: object
+                description: 'TODO: Schemaless required because for some reason JSONSchemaProps
+                  is not compatible with controller-gen. super unfortunate'
+                x-kubernetes-preserve-unknown-fields: true
               validator:
                 properties:
                   description:
@@ -149,7 +116,7 @@ spec:
                     items:
                       properties:
                         details:
-                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
                         field:
                           type: string
                         match:
@@ -167,7 +134,7 @@ spec:
                           type: string
                         value:
                           description: '!TODO: evaluator requires this is a string'
-                          type: object
+                          type: string
                       required:
                       - name
                       - value
@@ -179,6 +146,9 @@ spec:
                 required:
                 - productions
                 type: object
+            required:
+            - evaluator
+            - schema
             type: object
         type: object
     served: true

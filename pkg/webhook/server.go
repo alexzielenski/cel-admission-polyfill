@@ -157,7 +157,12 @@ func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	klog.Info("admission review requested")
+	klog.Infof(
+		"review request (%s:%s/%s)",
+		parsed.Request.Resource.String(),
+		parsed.Request.Namespace,
+		parsed.Request.Name,
+	)
 
 	var object unstructured.Unstructured
 	var oldObject unstructured.Unstructured
@@ -199,6 +204,14 @@ func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(out)
+	klog.Infof(
+		"review response (%s:%s/%s): %v {%v}",
+		parsed.Request.Resource.String(),
+		parsed.Request.Namespace,
+		parsed.Request.Name,
+		allowed,
+		errString,
+	)
 }
 
 func (wh *webhook) handleWebhookMutate(w http.ResponseWriter, req *http.Request) {

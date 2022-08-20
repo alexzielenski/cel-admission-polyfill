@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alexzielenski/cel_polyfill"
 	"github.com/alexzielenski/cel_polyfill/pkg/controller/structuralschema"
 	controllerv1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/controller/v1alpha1"
 	controllerv1alpha2 "github.com/alexzielenski/cel_polyfill/pkg/controller/v1alpha2"
@@ -72,6 +73,8 @@ func main() {
 		klog.Errorf("Failed to create apiextensions client: %v", err)
 		return
 	}
+
+	cel_polyfill.DEBUG_InstallCRDs(mainContext, dynamicClient)
 
 	// used to keep process alive until all workers are finished
 	waitGroup := sync.WaitGroup{}
@@ -176,6 +179,11 @@ func StartV1Alpha1(
 	structuralschemaController structuralschema.Controller,
 	informer v1alpha1.ValidationRuleSetInformer,
 ) validator.Interface {
+
+	if DEBUG {
+		// Install latest CRD definitions
+	}
+
 	validator := validator.New(structuralschemaController)
 
 	// call outside of goroutine so that informer is requested before we start
@@ -205,6 +213,10 @@ func StartV1Alpha2(
 	structuralschemaController structuralschema.Controller,
 	policyTemplatesInformer cache.SharedIndexInformer,
 ) validator.Interface {
+	if DEBUG {
+		// Install latest CRD definitions
+	}
+
 	controller := controllerv1alpha2.NewPolicyTemplateController(
 		dynamicClient,
 		policyTemplatesInformer,

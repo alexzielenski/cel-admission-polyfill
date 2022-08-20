@@ -22,11 +22,15 @@ type PolicyTemplateSpec struct {
 	// +optional
 	PluralName string `json:"pluralName,omitempty"`
 
+	//TODO: Schemaless required because for some reason JSONSchemaProps is not compatible
+	// with controller-gen. super unfortunate
 	// +required
-	Schema OpenAPISchema `json:"schema,omitempty"`
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Schema apiextensionsv1.JSONSchemaProps `json:"schema"`
 
 	// +required
-	Evaluator `json:"evaluator,omitempty"`
+	Evaluator `json:"evaluator"`
 
 	// +optional
 	*Validator `json:"validator,omitempty"`
@@ -61,7 +65,7 @@ type Evaluator struct {
 	Environment string `json:"environment,omitempty"`
 
 	// +required
-	Productions []Production `json:"productions,omitempty"`
+	Productions []Production `json:"productions"`
 
 	// +optional
 	Terms TermMap `json:"terms,omitempty"`
@@ -73,7 +77,7 @@ type Evaluator struct {
 type Term struct {
 	Name string `json:"name"`
 	//!TODO: evaluator requires this is a string
-	Value runtime.RawExtension `json:"value"`
+	Value string `json:"value"`
 }
 
 // +listType=map
@@ -106,6 +110,8 @@ type ValidatorProduction struct {
 	Message string `json:"message"`
 
 	// +optional
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:pruning:PreserveUnknownFields
 	Details runtime.RawExtension `json:"details,omitempty"`
 }
 
@@ -114,6 +120,8 @@ type Production struct {
 	Match string `json:"match,omitempty"`
 
 	// +optional
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:pruning:PreserveUnknownFields
 	Output runtime.RawExtension `json:"output,omitempty"`
 
 	// +optional
@@ -127,6 +135,8 @@ type Production struct {
 }
 
 type Decision struct {
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:pruning:PreserveUnknownFields
 	Output runtime.RawExtension `json:"output"`
 
 	// +optional

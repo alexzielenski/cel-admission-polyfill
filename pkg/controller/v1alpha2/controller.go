@@ -3,7 +3,6 @@ package v1alpha2
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -31,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	runtimeschema "k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
@@ -154,24 +154,23 @@ func (c *templateController) reconcilePolicyTemplate(
 		//!TODO: Remove this template from the policy engine as well
 		// as any of its instances
 		panic("deletion not implemented")
-		return nil
 	}
 
 	// Regenerate the CRD
 	// 1. Each policy template in turn owns a CRD
-	converted := v1alpha2.OpenAPISchemaTOJSONSchemaProps(&template.Schema)
-	if converted == nil {
-		utilruntime.HandleError(errors.New("failed to convert OpenAPISchema to JSONSchemaProps? THis hsould never happen"))
-		return nil
+	crdGVR := metav1.GroupVersionResource{
+		Group:    "policy.acme.co",
+		Version:  "v1",
+		Resource: template.Name,
 	}
 
 	crd := apiextensionsv1.CustomResourceDefinition{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "v1",
+			APIVersion: "apiextensions.k8s.io/v1",
 			Kind:       "CustomResourceDefinition",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name: template.Name + "." + template.GroupVersionKind().Group,
+			Name: template.Name + "." + crdGVR.Group,
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: template.APIVersion,
@@ -182,7 +181,7 @@ func (c *templateController) reconcilePolicyTemplate(
 			},
 		},
 		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
-			Group: template.GroupVersionKind().Group,
+			Group: crdGVR.Group,
 			Names: apiextensionsv1.CustomResourceDefinitionNames{
 				Plural:     template.Name,
 				Singular:   template.Name,
@@ -195,7 +194,7 @@ func (c *templateController) reconcilePolicyTemplate(
 			PreserveUnknownFields: false,
 			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
 				{
-					Name:                     template.GroupVersionKind().Version,
+					Name:                     crdGVR.Version,
 					Served:                   true,
 					Storage:                  true,
 					Deprecated:               false,
@@ -212,8 +211,8 @@ func (c *templateController) reconcilePolicyTemplate(
 								"metadata":    {Type: "object"},
 								"description": {Type: "string"},
 								"selector":    {Type: "object", Properties: map[string]apiextensionsv1.JSONSchemaProps{}},
-								"rule":        *converted,
-								"rules":       {Type: "array", Items: &apiextensionsv1.JSONSchemaPropsOrArray{Schema: converted}},
+								"rule":        template.Schema,
+								"rules":       {Type: "array", Items: &apiextensionsv1.JSONSchemaPropsOrArray{Schema: &template.Schema}},
 							},
 						},
 					},
@@ -222,13 +221,29 @@ func (c *templateController) reconcilePolicyTemplate(
 		},
 	}
 
+	crdJSON, err := json.Marshal(crd)
+	if err != nil {
+		utilruntime.HandleError(err)
+		return nil
+	}
+
 	//!TODO: dont use create if object exists. Unfortunately Patch can't
 	// be used to create object if it doesnt already exist?
-	_, err := c.crdClient.
-		ApiextensionsV1().
-		CustomResourceDefinitions().Create(context.TODO(), &crd, metav1.CreateOptions{
-		FieldManager: "template-controller",
-	})
+	_, err = c.crdClient.ApiextensionsV1().CustomResourceDefinitions().Patch(
+		c.runningContext,
+		crd.Name,
+		types.ApplyPatchType,
+		crdJSON,
+		metav1.PatchOptions{
+			FieldManager: "cel-polyfill-controller",
+		},
+	)
+
+	// _, err = c.crdClient.
+	// 	ApiextensionsV1().
+	// 	CustomResourceDefinitions().Create(context.TODO(), &crd, metav1.CreateOptions{
+	// 	FieldManager: "template-controller",
+	// })
 
 	if err != nil {
 		utilruntime.HandleError(err)
@@ -266,15 +281,10 @@ func (c *templateController) reconcilePolicyTemplate(
 		}
 
 		// Watch for new instances of this policy
-		instanceGVR := metav1.GroupVersionResource{
-			Group:    template.GroupVersionKind().Group,
-			Version:  template.GroupVersionKind().Version,
-			Resource: template.Name,
-		}
 		informer := dynamicinformer.NewFilteredDynamicInformer(c.dynamicClient, runtimeschema.GroupVersionResource{
-			Group:    instanceGVR.Group,
-			Version:  instanceGVR.Version,
-			Resource: instanceGVR.Resource,
+			Group:    crdGVR.Group,
+			Version:  crdGVR.Version,
+			Resource: crdGVR.Resource,
 		}, corev1.NamespaceAll, 30*time.Second, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, nil)
 
 		controller := controller.New(

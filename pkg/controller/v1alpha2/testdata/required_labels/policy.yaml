@@ -15,7 +15,7 @@
 apiVersion: celadmissionpolyfill.k8s.io/v1alpha2
 kind: PolicyTemplate
 metadata:
-  name: required_labels
+  name: requiredlabels
   namespace: default
 spec:
   schema:
@@ -25,7 +25,8 @@ spec:
     properties:
       labels:
         type: object
-        additionalProperties: {}
+        additionalProperties:
+          type: string
   evaluator:
     terms:
     - name: want
