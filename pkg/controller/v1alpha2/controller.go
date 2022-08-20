@@ -165,6 +165,10 @@ func (c *templateController) reconcilePolicyTemplate(
 		Resource: template.Name,
 	}
 
+	// Sometimes these are empty???
+	template.APIVersion = "celadmissionpolyfill.k8s.io/v1alpha2"
+	template.Kind = "PolicyTemplate"
+
 	crd := apiextensionsv1.CustomResourceDefinition{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "apiextensions.k8s.io/v1",
