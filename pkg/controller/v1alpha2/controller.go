@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/checker/decls"
+	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-policy-templates-go/policy"
 	"github.com/google/cel-policy-templates-go/policy/model"
 	expr "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
@@ -322,6 +323,65 @@ func (c *templateController) reconcilePolicyTemplate(
 	return err
 }
 
+type DecisionError struct {
+	Decisions []model.DecisionValue
+}
+
+func ValToMap(val interface{}) interface{} {
+	if val == nil {
+		return nil
+	}
+
+	switch val := val.(type) {
+	case ref.Val:
+		return ValToMap(val.Value())
+	case map[ref.Val]ref.Val:
+		converted := map[string]interface{}{}
+		for k, v := range val {
+			nativeKey := ValToMap(k)
+			keyStr, ok := nativeKey.(string)
+			if !ok {
+				keyStr = fmt.Sprint(nativeKey)
+			}
+			converted[keyStr] = ValToMap(v)
+		}
+		return converted
+	case []ref.Val:
+		converted := []interface{}{}
+		for _, v := range val {
+			converted = append(converted, ValToMap(v))
+		}
+		return converted
+	default:
+		return val
+	}
+}
+
+func (de DecisionError) ErrorJSON() []interface{} {
+	vs := []interface{}{}
+	for _, d := range de.Decisions {
+		if l, ok := d.(*model.ListDecisionValue); ok {
+			vals := l.Values()
+			for _, v := range vals {
+				vs = append(vs, ValToMap(v))
+			}
+		}
+	}
+
+	return vs
+}
+
+func (de DecisionError) Error() string {
+	vs := de.ErrorJSON()
+	js, err := json.MarshalIndent(vs, "", "    ")
+	if err != nil {
+		return fmt.Sprint(vs)
+	}
+	return string(js)
+}
+
+var _ error = DecisionError{}
+
 func (c *templateController) Validate(gvr metav1.GroupVersionResource, oldObj, obj interface{}) error {
 	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
 	if err != nil {
@@ -362,7 +422,7 @@ func (c *templateController) Validate(gvr metav1.GroupVersionResource, oldObj, o
 	}
 
 	if len(decisions) > 0 {
-		err := fmt.Errorf("failed with decisions: %v", decisions)
+		err := DecisionError{Decisions: decisions}
 		utilruntime.HandleError(err)
 		return err
 	}

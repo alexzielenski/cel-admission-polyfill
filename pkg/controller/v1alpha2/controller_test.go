@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io/ioutil"
+	"reflect"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/fake"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions"
 	"github.com/alexzielenski/cel_polyfill/pkg/validator"
+	"github.com/google/go-cmp/cmp"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -109,7 +111,7 @@ func TestBasic(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 
-	err = wait.PollWithContext(ctx, 30*time.Millisecond, 2*time.Second, func(ctx context.Context) (done bool, err error) {
+	err = wait.PollWithContext(ctx, 30*time.Millisecond, 1*time.Second, func(ctx context.Context) (done bool, err error) {
 		// Wait until CRD pops up
 		obj, err := fakeext.ApiextensionsV1().CustomResourceDefinitions().Get(
 			ctx,
@@ -202,8 +204,50 @@ func TestBasic(t *testing.T) {
 			},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected error")
+
+	// Check output
+	expected := []any{
+		map[string]any{
+			"details": map[string]any{
+				"data": []any{
+					"env",
+				},
+			},
+			"message": "invalid values provided on one or more labels",
+		},
+	}
+	actual := err.(controllerv1alpha2.DecisionError).ErrorJSON()
+	if !reflect.DeepEqual(expected, actual) {
+		t.Fatalf("%s", cmp.Diff(expected, actual))
+	}
+	err = controller.Validate(gvr, nil, &testdata.BasicUnion{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "stable.example.com/v1",
+			Kind:       "BasicUnion",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "testobject",
+			Namespace: "default",
+			Labels: map[string]string{
+				"verified": "true",
+				"env":      "prod",
+				// policy instance expects 'env': 'prod' and 'ssh': enabled
+			},
+		},
+	})
+	expected = []any{
+		map[string]any{
+			"details": map[string]any{
+				"data": []any{
+					"ssh",
+				},
+			},
+			"message": "missing one or more required labels",
+		},
+	}
+	actual = err.(controllerv1alpha2.DecisionError).ErrorJSON()
+	if !reflect.DeepEqual(expected, actual) {
+		t.Fatalf("%s", cmp.Diff(expected, actual))
 	}
 
 	err = controller.Validate(gvr, nil, &testdata.BasicUnion{
@@ -215,13 +259,32 @@ func TestBasic(t *testing.T) {
 			Name:      "testobject",
 			Namespace: "default",
 			Labels: map[string]string{
-				"ssh":      "enabled",
 				"verified": "true",
-				// policy instance expects 'env': 'prod'
+				"env":      "incorrect",
+				// policy instance expects 'env': 'prod' and 'ssh': enabled
 			},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected error")
+	expected = []any{
+		map[string]any{
+			"details": map[string]any{
+				"data": []any{
+					"ssh",
+				},
+			},
+			"message": "missing one or more required labels",
+		},
+		map[string]any{
+			"details": map[string]any{
+				"data": []any{
+					"env",
+				},
+			},
+			"message": "invalid values provided on one or more labels",
+		},
+	}
+	actual = err.(controllerv1alpha2.DecisionError).ErrorJSON()
+	if !reflect.DeepEqual(expected, actual) {
+		t.Fatalf("%s", cmp.Diff(expected, actual))
 	}
 }
