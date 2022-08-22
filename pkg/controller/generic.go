@@ -60,8 +60,8 @@ func New[T runtime.Object](
 }
 
 func (c *controller[T]) Run(ctx context.Context) error {
-	klog.Info("starting admission rules controller")
-	defer klog.Info("stopping admission rules controller")
+	klog.Infof("starting %s", c.options.Name)
+	defer klog.Infof("stopping %s", c.options.Name)
 
 	enqueue := func(obj interface{}) {
 		var key string

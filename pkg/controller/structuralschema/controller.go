@@ -92,8 +92,6 @@ func (sc *structuralSchemaController) Get(gvr metav1.GroupVersionResource) (*api
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
 
-	sc.structuralSchemas[name] = make(map[string]*apiserverschema.Structural)
-
 	// copied from https://github.com/kubernetes/kubernetes/blob/01cf641ffbb3c876c4fc6c3e53a0613356f883e5/staging/src/k8s.io/apiextensions-apiserver/pkg/apiserver/customresource_handler.go#L650-L651
 	for _, v := range crd.Spec.Versions {
 		sch, err := apiextensionshelpers.GetSchemaForVersion(crd, v.Name)
@@ -124,6 +122,10 @@ func (sc *structuralSchemaController) Get(gvr metav1.GroupVersionResource) (*api
 				utilruntime.HandleError(fmt.Errorf("failed to prune defaults: %v", err))
 				return nil, fmt.Errorf("the server could not properly serve the CR schema") // validation should avoid this
 			}
+		}
+
+		if _, exists := sc.structuralSchemas[name]; !exists {
+			sc.structuralSchemas[name] = make(map[string]*apiserverschema.Structural)
 		}
 
 		sc.structuralSchemas[name][v.Name] = s

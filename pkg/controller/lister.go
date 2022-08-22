@@ -30,6 +30,7 @@ func (w namespacedLister[T]) Get(name string) (T, error) {
 		return result, err
 	}
 	if !exists {
+		//!TODO: get a real resource name?
 		return result, kerrors.NewNotFound(v1alpha1.Resource("validationruleset"), name)
 	}
 	result = obj.(T)

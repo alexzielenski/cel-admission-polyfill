@@ -167,15 +167,20 @@ func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Reques
 	var object unstructured.Unstructured
 	var oldObject unstructured.Unstructured
 
-	err = json.Unmarshal(parsed.Request.OldObject.Raw, &oldObject)
-	// if err != nil {
-	// 	// http.Error(w, err.Error(), http.StatusInternalServerError)
-	// 	return
-	// }
-	err = json.Unmarshal(parsed.Request.Object.Raw, &object)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if len(parsed.Request.OldObject.Raw) > 0 {
+		err = json.Unmarshal(parsed.Request.OldObject.Raw, &oldObject)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if len(parsed.Request.Object.Raw) > 0 {
+		err = json.Unmarshal(parsed.Request.Object.Raw, &object)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	verr := wh.validator.Validate(parsed.Request.Resource, &oldObject, &object)
