@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -31,7 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	runtimeschema "k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
+	patchtypes "k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
@@ -160,6 +161,9 @@ func (c *templateController) reconcilePolicyTemplate(
 	// Regenerate the CRD
 	// 1. Each policy template in turn owns a CRD
 	crdGVR := metav1.GroupVersionResource{
+		//!TODO: decide policy for which group to use
+		//	example: OPA gatekeeper uses specialized constraints group for all
+		//		constraints
 		Group:    "policy.acme.co",
 		Version:  "v1",
 		Resource: template.Name,
@@ -175,6 +179,8 @@ func (c *templateController) reconcilePolicyTemplate(
 			Kind:       "CustomResourceDefinition",
 		},
 		ObjectMeta: metav1.ObjectMeta{
+			//TODO: too naive. Need enforcement from apiserver of uniqueness
+			// constraint that follows from CRD names through to policy template names
 			Name: template.Name + "." + crdGVR.Group,
 			OwnerReferences: []metav1.OwnerReference{
 				{
@@ -188,6 +194,8 @@ func (c *templateController) reconcilePolicyTemplate(
 		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
 			Group: crdGVR.Group,
 			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				//!TOOD: Validation that requires template name to be lowercase
+				// required for uniqueness (since all names are lowercase)
 				Plural:     template.Name,
 				Singular:   template.Name,
 				ShortNames: []string{},
@@ -237,7 +245,7 @@ func (c *templateController) reconcilePolicyTemplate(
 	_, err = c.crdClient.ApiextensionsV1().CustomResourceDefinitions().Patch(
 		c.runningContext,
 		crd.Name,
-		types.ApplyPatchType,
+		patchtypes.ApplyPatchType,
 		crdJSON,
 		metav1.PatchOptions{
 			FieldManager: "cel-polyfill-controller",
@@ -357,7 +365,27 @@ func ValToMap(val interface{}) interface{} {
 
 	switch val := val.(type) {
 	case ref.Val:
-		return ValToMap(val.Value())
+		nested := val.Value()
+		if nested != val {
+			return ValToMap(nested)
+		}
+
+		converted, err := val.ConvertToNative(reflect.TypeOf([]interface{}{}))
+		if err == nil {
+			return converted
+		}
+
+		converted, err = val.ConvertToNative(reflect.TypeOf(map[string]interface{}{}))
+		if err == nil {
+			return converted
+		}
+
+		converted, err = val.ConvertToNative(reflect.TypeOf([]interface{}{}).Elem())
+		if err == nil {
+			return converted
+		}
+
+		return val
 	case map[ref.Val]ref.Val:
 		converted := map[string]interface{}{}
 		for k, v := range val {
