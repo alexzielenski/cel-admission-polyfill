@@ -184,7 +184,7 @@ func StartV1Alpha1(
 		// Install latest CRD definitions
 	}
 
-	validator := validator.New(structuralschemaController)
+	validator := controllerv1alpha1.NewValidator(structuralschemaController)
 
 	// call outside of goroutine so that informer is requested before we start
 	// factory. (for some reason factory doesn't start informers requested

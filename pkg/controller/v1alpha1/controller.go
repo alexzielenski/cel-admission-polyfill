@@ -6,12 +6,11 @@ import (
 	"github.com/alexzielenski/cel_polyfill/pkg/apis/celadmissionpolyfill.k8s.io/v1alpha1"
 	"github.com/alexzielenski/cel_polyfill/pkg/controller"
 	informers "github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions/celadmissionpolyfill.k8s.io/v1alpha1"
-	"github.com/alexzielenski/cel_polyfill/pkg/validator"
 )
 
 func NewAdmissionRulesController(
 	ruleSetsInformer informers.ValidationRuleSetInformer,
-	validator validator.RuleSetValidator,
+	validator RuleSetValidator,
 ) controller.Interface {
 	name := "admissionRulesController"
 	result := &admissionRulesController{
@@ -31,7 +30,7 @@ func NewAdmissionRulesController(
 
 type admissionRulesController struct {
 	name       string
-	validator  validator.RuleSetValidator
+	validator  RuleSetValidator
 	controller controller.Interface
 }
 

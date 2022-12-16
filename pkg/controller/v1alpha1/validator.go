@@ -1,4 +1,4 @@
-package validator
+package v1alpha1
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 
 	polyfillv1 "github.com/alexzielenski/cel_polyfill/pkg/apis/celadmissionpolyfill.k8s.io/v1alpha1"
 	"github.com/alexzielenski/cel_polyfill/pkg/controller/structuralschema"
+	"github.com/alexzielenski/cel_polyfill/pkg/validator"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiserverschema "k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
@@ -17,7 +18,7 @@ import (
 )
 
 type RuleSetValidator interface {
-	Interface
+	validator.Interface
 
 	// Adds a Ruleset to be enforced by the Validate function.
 	// If there is an existing ruleset with the same namespace/name, if is
@@ -32,7 +33,7 @@ type RuleSetValidator interface {
 	RemoveRuleSet(namespace string, name string)
 }
 
-type validator struct {
+type ruleValidator struct {
 	structuralSchemaController structuralschema.Controller
 
 	//!TODO: refactor Validate and change to RWMutex
@@ -94,16 +95,16 @@ func (r ruleSetCacheEntry) Matches(gvr metav1.GroupVersionResource) bool {
 	return true
 }
 
-func New(
+func NewValidator(
 	structuralSchemaController structuralschema.Controller,
 ) RuleSetValidator {
-	return &validator{
+	return &ruleValidator{
 		registeredRuleSets:         make(map[string]ruleSetCacheEntry),
 		structuralSchemaController: structuralSchemaController,
 	}
 }
 
-func (v *validator) Validate(gvr metav1.GroupVersionResource, oldObj, obj interface{}) ValidationResult {
+func (v *ruleValidator) Validate(gvr metav1.GroupVersionResource, oldObj, obj interface{}) validator.ValidationResult {
 	// 1. Find rules which match against this object
 	// 2. Find compiled CEL rules for this object's type. If not yet
 	//	seen, compile for this type and save.
@@ -115,7 +116,7 @@ func (v *validator) Validate(gvr metav1.GroupVersionResource, oldObj, obj interf
 	// ended up being a match for this gvk among the registered rules
 	structural, err := v.structuralSchemaController.Get(gvr)
 	if err != nil {
-		return ValidationResult{Status: ValidationOK}
+		return validator.ValidationResult{Status: validator.ValidationOK}
 	}
 
 	v.lock.Lock()
@@ -206,16 +207,16 @@ func (v *validator) Validate(gvr metav1.GroupVersionResource, oldObj, obj interf
 			klog.Error(e)
 		}
 
-		return ValidationResult{
-			Status: ValidationForbidden,
+		return validator.ValidationResult{
+			Status: validator.ValidationForbidden,
 			Error:  failures.ToAggregate(),
 		}
 	}
 
-	return ValidationResult{Status: ValidationOK}
+	return validator.ValidationResult{Status: validator.ValidationOK}
 }
 
-func (v *validator) AddRuleSet(ruleSet *polyfillv1.ValidationRuleSet) {
+func (v *ruleValidator) AddRuleSet(ruleSet *polyfillv1.ValidationRuleSet) {
 	v.lock.Lock()
 	defer v.lock.Unlock()
 
@@ -225,7 +226,7 @@ func (v *validator) AddRuleSet(ruleSet *polyfillv1.ValidationRuleSet) {
 	}
 }
 
-func (v *validator) RemoveRuleSet(namespace string, name string) {
+func (v *ruleValidator) RemoveRuleSet(namespace string, name string) {
 	v.lock.Lock()
 	defer v.lock.Unlock()
 

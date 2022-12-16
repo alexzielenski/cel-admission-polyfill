@@ -38,7 +38,7 @@ func TestBasic(t *testing.T) {
 	structuralschemaController := structuralschema.NewController(
 		apiextensionsFactory.Apiextensions().V1().CustomResourceDefinitions().Informer(),
 	)
-	vald := validator.New(structuralschemaController)
+	vald := controllerv1alpha1.NewValidator(structuralschemaController)
 
 	// Populates the validator with rule sets depending upon the CRD definition
 	controller := controllerv1alpha1.NewAdmissionRulesController(
