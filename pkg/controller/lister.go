@@ -1,10 +1,11 @@
 package controller
 
 import (
-	"github.com/alexzielenski/cel_polyfill/pkg/apis/celadmissionpolyfill.k8s.io/v1alpha1"
+	"k8s.io/api/node/v1alpha1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -31,7 +32,7 @@ func (w namespacedLister[T]) Get(name string) (T, error) {
 	}
 	if !exists {
 		//!TODO: get a real resource name?
-		return result, kerrors.NewNotFound(v1alpha1.Resource("validationruleset"), name)
+		return result, kerrors.NewNotFound(schema.GroupResource{}, name)
 	}
 	result = obj.(T)
 	return result, nil

@@ -34,12 +34,12 @@ func NewOpenAPISchema() *OpenAPISchema {
 // supported by Kubernetes which can also be specified within Protocol Buffers.
 //
 // There are a handful of notable differences:
-//   - The validating constructs `allOf`, `anyOf`, `oneOf`, `not`, and type-related restrictsion are
-//     not supported as they can be better validated in the template 'validator' block.
-//   - The $ref field supports references to other schema definitions, but such aliases
-//     should be removed before being serialized.
-//   - The `additionalProperties` and `properties` fields are not currently mutually exclusive as is
-//     the case for Kubernetes.
+// - The validating constructs `allOf`, `anyOf`, `oneOf`, `not`, and type-related restrictsion are
+//   not supported as they can be better validated in the template 'validator' block.
+// - The $ref field supports references to other schema definitions, but such aliases
+//   should be removed before being serialized.
+// - The `additionalProperties` and `properties` fields are not currently mutually exclusive as is
+//   the case for Kubernetes.
 //
 // See: https://kubernetes.io/docs/tasks/access-kubernetes-api/custom-resources/custom-resource-definitions/#validation
 type OpenAPISchema struct {
@@ -345,7 +345,8 @@ properties:
     type: string
   metadata:
     type: object
-    additionalProperties: {}
+    additionalProperties:
+      type: string
   description:
     type: string
   selector:

@@ -4,7 +4,6 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.9.2
-    "api-approved.kubernetes.io": "unapproved, experimental-only"
   creationTimestamp: null
   name: validationrulesets.celadmissionpolyfill.k8s.io
 spec:
@@ -16,7 +15,7 @@ spec:
     singular: validationruleset
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - name: v0alpha1
     schema:
       openAPIV3Schema:
         properties:
@@ -47,6 +46,7 @@ spec:
                       items:
                         type: string
                       type: array
+                      x-kubernetes-list-type: atomic
                     apiVersions:
                       description: APIVersions is the API versions the resources belong
                         to. '*' is all versions. If '*' is present, the length of
@@ -54,6 +54,7 @@ spec:
                       items:
                         type: string
                       type: array
+                      x-kubernetes-list-type: atomic
                     operations:
                       description: Operations is the operations the admission hook
                         cares about - CREATE, UPDATE, DELETE, CONNECT or * for all
@@ -64,6 +65,7 @@ spec:
                         description: OperationType specifies an operation for a request.
                         type: string
                       type: array
+                      x-kubernetes-list-type: atomic
                     resources:
                       description: "Resources is a list of resources this rule applies
                         to. \n For example: 'pods' means pods. 'pods/log' means the
@@ -77,6 +79,7 @@ spec:
                       items:
                         type: string
                       type: array
+                      x-kubernetes-list-type: atomic
                     scope:
                       description: scope specifies the scope of this rule. Valid values
                         are "Cluster", "Namespaced", and "*" "Cluster" means that

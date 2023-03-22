@@ -20,10 +20,10 @@ package fake
 
 import (
 	clientset "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned"
-	celadmissionpolyfillv1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v1alpha1"
-	fakeceladmissionpolyfillv1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v1alpha1/fake"
-	celadmissionpolyfillv1alpha2 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v1alpha2"
-	fakeceladmissionpolyfillv1alpha2 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v1alpha2/fake"
+	celadmissionpolyfillv0alpha1 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v0alpha1"
+	fakeceladmissionpolyfillv0alpha1 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v0alpha1/fake"
+	celadmissionpolyfillv0alpha2 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v0alpha2"
+	fakeceladmissionpolyfillv0alpha2 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v0alpha2/fake"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/discovery"
@@ -81,12 +81,12 @@ var (
 	_ testing.FakeClient  = &Clientset{}
 )
 
-// CeladmissionpolyfillV1alpha1 retrieves the CeladmissionpolyfillV1alpha1Client
-func (c *Clientset) CeladmissionpolyfillV1alpha1() celadmissionpolyfillv1alpha1.CeladmissionpolyfillV1alpha1Interface {
-	return &fakeceladmissionpolyfillv1alpha1.FakeCeladmissionpolyfillV1alpha1{Fake: &c.Fake}
+// CeladmissionpolyfillV0alpha1 retrieves the CeladmissionpolyfillV0alpha1Client
+func (c *Clientset) CeladmissionpolyfillV0alpha1() celadmissionpolyfillv0alpha1.CeladmissionpolyfillV0alpha1Interface {
+	return &fakeceladmissionpolyfillv0alpha1.FakeCeladmissionpolyfillV0alpha1{Fake: &c.Fake}
 }
 
-// CeladmissionpolyfillV1alpha2 retrieves the CeladmissionpolyfillV1alpha2Client
-func (c *Clientset) CeladmissionpolyfillV1alpha2() celadmissionpolyfillv1alpha2.CeladmissionpolyfillV1alpha2Interface {
-	return &fakeceladmissionpolyfillv1alpha2.FakeCeladmissionpolyfillV1alpha2{Fake: &c.Fake}
+// CeladmissionpolyfillV0alpha2 retrieves the CeladmissionpolyfillV0alpha2Client
+func (c *Clientset) CeladmissionpolyfillV0alpha2() celadmissionpolyfillv0alpha2.CeladmissionpolyfillV0alpha2Interface {
+	return &fakeceladmissionpolyfillv0alpha2.FakeCeladmissionpolyfillV0alpha2{Fake: &c.Fake}
 }

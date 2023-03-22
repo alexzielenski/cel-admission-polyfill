@@ -19,17 +19,17 @@ limitations under the License.
 package celadmissionpolyfill
 
 import (
-	v1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions/celadmissionpolyfill.k8s.io/v1alpha1"
-	v1alpha2 "github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions/celadmissionpolyfill.k8s.io/v1alpha2"
+	v0alpha1 "github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions/celadmissionpolyfill.k8s.io/v0alpha1"
+	v0alpha2 "github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions/celadmissionpolyfill.k8s.io/v0alpha2"
 	internalinterfaces "github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions/internalinterfaces"
 )
 
 // Interface provides access to each of this group's versions.
 type Interface interface {
-	// V1alpha1 provides access to shared informers for resources in V1alpha1.
-	V1alpha1() v1alpha1.Interface
-	// V1alpha2 provides access to shared informers for resources in V1alpha2.
-	V1alpha2() v1alpha2.Interface
+	// V0alpha1 provides access to shared informers for resources in V0alpha1.
+	V0alpha1() v0alpha1.Interface
+	// V0alpha2 provides access to shared informers for resources in V0alpha2.
+	V0alpha2() v0alpha2.Interface
 }
 
 type group struct {
@@ -43,12 +43,12 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 	return &group{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
-// V1alpha1 returns a new v1alpha1.Interface.
-func (g *group) V1alpha1() v1alpha1.Interface {
-	return v1alpha1.New(g.factory, g.namespace, g.tweakListOptions)
+// V0alpha1 returns a new v0alpha1.Interface.
+func (g *group) V0alpha1() v0alpha1.Interface {
+	return v0alpha1.New(g.factory, g.namespace, g.tweakListOptions)
 }
 
-// V1alpha2 returns a new v1alpha2.Interface.
-func (g *group) V1alpha2() v1alpha2.Interface {
-	return v1alpha2.New(g.factory, g.namespace, g.tweakListOptions)
+// V0alpha2 returns a new v0alpha2.Interface.
+func (g *group) V0alpha2() v0alpha2.Interface {
+	return v0alpha2.New(g.factory, g.namespace, g.tweakListOptions)
 }

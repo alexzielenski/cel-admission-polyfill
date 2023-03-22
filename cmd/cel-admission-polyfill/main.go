@@ -10,12 +10,12 @@ import (
 
 	"github.com/alexzielenski/cel_polyfill"
 	"github.com/alexzielenski/cel_polyfill/pkg/controller/structuralschema"
-	controllerv1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/controller/v1alpha1"
-	controllerv1alpha2 "github.com/alexzielenski/cel_polyfill/pkg/controller/v1alpha2"
+	controllerv0alpha1 "github.com/alexzielenski/cel_polyfill/pkg/controller/v0alpha1"
+	controllerv0alpha2 "github.com/alexzielenski/cel_polyfill/pkg/controller/v0alpha2"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/scheme"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions"
-	"github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions/celadmissionpolyfill.k8s.io/v1alpha1"
+	"github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions/celadmissionpolyfill.k8s.io/v0alpha1"
 	"github.com/alexzielenski/cel_polyfill/pkg/validator"
 	"github.com/alexzielenski/cel_polyfill/pkg/webhook"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
@@ -101,8 +101,8 @@ func main() {
 
 	waitGroup.Add(2)
 	validators := []validator.Interface{
-		StartV1Alpha1(serverContext, cleanupWorker, structuralschemaController, customFactory.Celadmissionpolyfill().V1alpha1().ValidationRuleSets()),
-		StartV1Alpha2(serverContext, cleanupWorker, dynamicClient, apiextensionsClient, structuralschemaController, customFactory.Celadmissionpolyfill().V1alpha2().PolicyTemplates().Informer()),
+		StartV1Alpha1(serverContext, cleanupWorker, structuralschemaController, customFactory.Celadmissionpolyfill().V0alpha1().ValidationRuleSets()),
+		StartV1Alpha2(serverContext, cleanupWorker, dynamicClient, apiextensionsClient, structuralschemaController, customFactory.Celadmissionpolyfill().V0alpha2().PolicyTemplates().Informer()),
 	}
 
 	// Start HTTP REST server for webhook
@@ -177,19 +177,19 @@ func StartV1Alpha1(
 	ctx context.Context,
 	cancelFunc func(),
 	structuralschemaController structuralschema.Controller,
-	informer v1alpha1.ValidationRuleSetInformer,
+	informer v0alpha1.ValidationRuleSetInformer,
 ) validator.Interface {
 
 	if DEBUG {
 		// Install latest CRD definitions
 	}
 
-	validator := controllerv1alpha1.NewValidator(structuralschemaController)
+	validator := controllerv0alpha1.NewValidator(structuralschemaController)
 
 	// call outside of goroutine so that informer is requested before we start
 	// factory. (for some reason factory doesn't start informers requested
 	// after it was already started?)
-	admissionRulesController := controllerv1alpha1.NewAdmissionRulesController(
+	admissionRulesController := controllerv0alpha1.NewAdmissionRulesController(
 		informer,
 		validator,
 	)
@@ -217,7 +217,7 @@ func StartV1Alpha2(
 		// Install latest CRD definitions
 	}
 
-	controller := controllerv1alpha2.NewPolicyTemplateController(
+	controller := controllerv0alpha2.NewPolicyTemplateController(
 		dynamicClient,
 		policyTemplatesInformer,
 		structuralschemaController,

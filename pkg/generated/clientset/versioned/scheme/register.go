@@ -19,8 +19,8 @@ limitations under the License.
 package scheme
 
 import (
-	celadmissionpolyfillv1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/apis/celadmissionpolyfill.k8s.io/v1alpha1"
-	celadmissionpolyfillv1alpha2 "github.com/alexzielenski/cel_polyfill/pkg/apis/celadmissionpolyfill.k8s.io/v1alpha2"
+	celadmissionpolyfillv0alpha1 "github.com/alexzielenski/cel_polyfill/pkg/apis/celadmissionpolyfill.k8s.io/v0alpha1"
+	celadmissionpolyfillv0alpha2 "github.com/alexzielenski/cel_polyfill/pkg/apis/celadmissionpolyfill.k8s.io/v0alpha2"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
@@ -32,8 +32,8 @@ var Scheme = runtime.NewScheme()
 var Codecs = serializer.NewCodecFactory(Scheme)
 var ParameterCodec = runtime.NewParameterCodec(Scheme)
 var localSchemeBuilder = runtime.SchemeBuilder{
-	celadmissionpolyfillv1alpha1.AddToScheme,
-	celadmissionpolyfillv1alpha2.AddToScheme,
+	celadmissionpolyfillv0alpha1.AddToScheme,
+	celadmissionpolyfillv0alpha2.AddToScheme,
 }
 
 // AddToScheme adds all types of this clientset into the given scheme. This allows composition

@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"net/http"
 
-	celadmissionpolyfillv1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v1alpha1"
-	celadmissionpolyfillv1alpha2 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v1alpha2"
+	celadmissionpolyfillv0alpha1 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v0alpha1"
+	celadmissionpolyfillv0alpha2 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v0alpha2"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
 	flowcontrol "k8s.io/client-go/util/flowcontrol"
@@ -31,26 +31,25 @@ import (
 
 type Interface interface {
 	Discovery() discovery.DiscoveryInterface
-	CeladmissionpolyfillV1alpha1() celadmissionpolyfillv1alpha1.CeladmissionpolyfillV1alpha1Interface
-	CeladmissionpolyfillV1alpha2() celadmissionpolyfillv1alpha2.CeladmissionpolyfillV1alpha2Interface
+	CeladmissionpolyfillV0alpha1() celadmissionpolyfillv0alpha1.CeladmissionpolyfillV0alpha1Interface
+	CeladmissionpolyfillV0alpha2() celadmissionpolyfillv0alpha2.CeladmissionpolyfillV0alpha2Interface
 }
 
-// Clientset contains the clients for groups. Each group has exactly one
-// version included in a Clientset.
+// Clientset contains the clients for groups.
 type Clientset struct {
 	*discovery.DiscoveryClient
-	celadmissionpolyfillV1alpha1 *celadmissionpolyfillv1alpha1.CeladmissionpolyfillV1alpha1Client
-	celadmissionpolyfillV1alpha2 *celadmissionpolyfillv1alpha2.CeladmissionpolyfillV1alpha2Client
+	celadmissionpolyfillV0alpha1 *celadmissionpolyfillv0alpha1.CeladmissionpolyfillV0alpha1Client
+	celadmissionpolyfillV0alpha2 *celadmissionpolyfillv0alpha2.CeladmissionpolyfillV0alpha2Client
 }
 
-// CeladmissionpolyfillV1alpha1 retrieves the CeladmissionpolyfillV1alpha1Client
-func (c *Clientset) CeladmissionpolyfillV1alpha1() celadmissionpolyfillv1alpha1.CeladmissionpolyfillV1alpha1Interface {
-	return c.celadmissionpolyfillV1alpha1
+// CeladmissionpolyfillV0alpha1 retrieves the CeladmissionpolyfillV0alpha1Client
+func (c *Clientset) CeladmissionpolyfillV0alpha1() celadmissionpolyfillv0alpha1.CeladmissionpolyfillV0alpha1Interface {
+	return c.celadmissionpolyfillV0alpha1
 }
 
-// CeladmissionpolyfillV1alpha2 retrieves the CeladmissionpolyfillV1alpha2Client
-func (c *Clientset) CeladmissionpolyfillV1alpha2() celadmissionpolyfillv1alpha2.CeladmissionpolyfillV1alpha2Interface {
-	return c.celadmissionpolyfillV1alpha2
+// CeladmissionpolyfillV0alpha2 retrieves the CeladmissionpolyfillV0alpha2Client
+func (c *Clientset) CeladmissionpolyfillV0alpha2() celadmissionpolyfillv0alpha2.CeladmissionpolyfillV0alpha2Interface {
+	return c.celadmissionpolyfillV0alpha2
 }
 
 // Discovery retrieves the DiscoveryClient
@@ -97,11 +96,11 @@ func NewForConfigAndClient(c *rest.Config, httpClient *http.Client) (*Clientset,
 
 	var cs Clientset
 	var err error
-	cs.celadmissionpolyfillV1alpha1, err = celadmissionpolyfillv1alpha1.NewForConfigAndClient(&configShallowCopy, httpClient)
+	cs.celadmissionpolyfillV0alpha1, err = celadmissionpolyfillv0alpha1.NewForConfigAndClient(&configShallowCopy, httpClient)
 	if err != nil {
 		return nil, err
 	}
-	cs.celadmissionpolyfillV1alpha2, err = celadmissionpolyfillv1alpha2.NewForConfigAndClient(&configShallowCopy, httpClient)
+	cs.celadmissionpolyfillV0alpha2, err = celadmissionpolyfillv0alpha2.NewForConfigAndClient(&configShallowCopy, httpClient)
 	if err != nil {
 		return nil, err
 	}
@@ -126,8 +125,8 @@ func NewForConfigOrDie(c *rest.Config) *Clientset {
 // New creates a new Clientset for the given RESTClient.
 func New(c rest.Interface) *Clientset {
 	var cs Clientset
-	cs.celadmissionpolyfillV1alpha1 = celadmissionpolyfillv1alpha1.New(c)
-	cs.celadmissionpolyfillV1alpha2 = celadmissionpolyfillv1alpha2.New(c)
+	cs.celadmissionpolyfillV0alpha1 = celadmissionpolyfillv0alpha1.New(c)
+	cs.celadmissionpolyfillV0alpha2 = celadmissionpolyfillv0alpha2.New(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClient(c)
 	return &cs

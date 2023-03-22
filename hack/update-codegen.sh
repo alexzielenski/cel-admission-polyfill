@@ -26,7 +26,7 @@ function codegen::join() { local IFS="$1"; shift; echo "$*"; }
 
 PKG_NAME="github.com/alexzielenski/cel_polyfill"
 
-GROUPS_WITH_VERSIONS="celadmissionpolyfill.k8s.io:v1alpha1,v1alpha2"
+GROUPS_WITH_VERSIONS="celadmissionpolyfill.k8s.io:v0alpha1,v0alpha2"
 
 APIS_PKG="${PKG_NAME}/pkg/apis"
 OUTPUT_PKG="pkg/generated"
