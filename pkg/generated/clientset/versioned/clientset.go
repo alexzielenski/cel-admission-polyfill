@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 
+	admissionregistrationv1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/admissionregistration.polyfill.sigs.k8s.io/v1alpha1"
 	celadmissionpolyfillv0alpha1 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v0alpha1"
 	celadmissionpolyfillv0alpha2 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v0alpha2"
 	discovery "k8s.io/client-go/discovery"
@@ -31,6 +32,7 @@ import (
 
 type Interface interface {
 	Discovery() discovery.DiscoveryInterface
+	AdmissionregistrationV1alpha1() admissionregistrationv1alpha1.AdmissionregistrationV1alpha1Interface
 	CeladmissionpolyfillV0alpha1() celadmissionpolyfillv0alpha1.CeladmissionpolyfillV0alpha1Interface
 	CeladmissionpolyfillV0alpha2() celadmissionpolyfillv0alpha2.CeladmissionpolyfillV0alpha2Interface
 }
@@ -38,8 +40,14 @@ type Interface interface {
 // Clientset contains the clients for groups.
 type Clientset struct {
 	*discovery.DiscoveryClient
-	celadmissionpolyfillV0alpha1 *celadmissionpolyfillv0alpha1.CeladmissionpolyfillV0alpha1Client
-	celadmissionpolyfillV0alpha2 *celadmissionpolyfillv0alpha2.CeladmissionpolyfillV0alpha2Client
+	admissionregistrationV1alpha1 *admissionregistrationv1alpha1.AdmissionregistrationV1alpha1Client
+	celadmissionpolyfillV0alpha1  *celadmissionpolyfillv0alpha1.CeladmissionpolyfillV0alpha1Client
+	celadmissionpolyfillV0alpha2  *celadmissionpolyfillv0alpha2.CeladmissionpolyfillV0alpha2Client
+}
+
+// AdmissionregistrationV1alpha1 retrieves the AdmissionregistrationV1alpha1Client
+func (c *Clientset) AdmissionregistrationV1alpha1() admissionregistrationv1alpha1.AdmissionregistrationV1alpha1Interface {
+	return c.admissionregistrationV1alpha1
 }
 
 // CeladmissionpolyfillV0alpha1 retrieves the CeladmissionpolyfillV0alpha1Client
@@ -96,6 +104,10 @@ func NewForConfigAndClient(c *rest.Config, httpClient *http.Client) (*Clientset,
 
 	var cs Clientset
 	var err error
+	cs.admissionregistrationV1alpha1, err = admissionregistrationv1alpha1.NewForConfigAndClient(&configShallowCopy, httpClient)
+	if err != nil {
+		return nil, err
+	}
 	cs.celadmissionpolyfillV0alpha1, err = celadmissionpolyfillv0alpha1.NewForConfigAndClient(&configShallowCopy, httpClient)
 	if err != nil {
 		return nil, err
@@ -125,6 +137,7 @@ func NewForConfigOrDie(c *rest.Config) *Clientset {
 // New creates a new Clientset for the given RESTClient.
 func New(c rest.Interface) *Clientset {
 	var cs Clientset
+	cs.admissionregistrationV1alpha1 = admissionregistrationv1alpha1.New(c)
 	cs.celadmissionpolyfillV0alpha1 = celadmissionpolyfillv0alpha1.New(c)
 	cs.celadmissionpolyfillV0alpha2 = celadmissionpolyfillv0alpha2.New(c)
 

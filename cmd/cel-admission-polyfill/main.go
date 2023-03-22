@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/alexzielenski/cel_polyfill"
+	controllerv0alpha1 "github.com/alexzielenski/cel_polyfill/pkg/controller/celadmissionpolyfill.k8s.io/v0alpha1"
+	controllerv0alpha2 "github.com/alexzielenski/cel_polyfill/pkg/controller/celadmissionpolyfill.k8s.io/v0alpha2"
 	"github.com/alexzielenski/cel_polyfill/pkg/controller/structuralschema"
-	controllerv0alpha1 "github.com/alexzielenski/cel_polyfill/pkg/controller/v0alpha1"
-	controllerv0alpha2 "github.com/alexzielenski/cel_polyfill/pkg/controller/v0alpha2"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/scheme"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions"
@@ -21,7 +21,14 @@ import (
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apiextensionsclientsetscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
 	apiextensionsinformers "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
+	"k8s.io/apimachinery/pkg/api/meta"
+
+	"k8s.io/apiserver/pkg/admission"
+	"k8s.io/apiserver/pkg/admission/plugin/validatingadmissionpolicy"
+	"k8s.io/apiserver/pkg/authorization/authorizer"
+	"k8s.io/apiserver/pkg/cel/openapi/resolver"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -82,12 +89,13 @@ func main() {
 
 	// Start any informers
 	// What is appropriate resync perriod?
+	factory := informers.NewSharedInformerFactory(kubeClient, 30*time.Second)
 	customFactory := externalversions.NewSharedInformerFactory(customClient, 30*time.Second)
 	apiextensionsFactory := apiextensionsinformers.NewSharedInformerFactory(apiextensionsClient, 30*time.Second)
 
-	structuralschemaController := structuralschema.NewController(
-		apiextensionsFactory.Apiextensions().V1().CustomResourceDefinitions().Informer(),
-	)
+	// structuralschemaController := structuralschema.NewController(
+	// 	apiextensionsFactory.Apiextensions().V1().CustomResourceDefinitions().Informer(),
+	// )
 
 	// should by called by each worker when it has finished cleaning up
 	// main function blocks on each worker being done
@@ -100,15 +108,16 @@ func main() {
 	}
 
 	waitGroup.Add(2)
-	validators := []validator.Interface{
-		StartV1Alpha1(serverContext, cleanupWorker, structuralschemaController, customFactory.Celadmissionpolyfill().V0alpha1().ValidationRuleSets()),
-		StartV1Alpha2(serverContext, cleanupWorker, dynamicClient, apiextensionsClient, structuralschemaController, customFactory.Celadmissionpolyfill().V0alpha2().PolicyTemplates().Informer()),
+	validators := []admission.ValidationInterface{
+		// StartV0Alpha1(serverContext, cleanupWorker, structuralschemaController, customFactory.Celadmissionpolyfill().V0alpha1().ValidationRuleSets()),
+		// StartV0Alpha2(serverContext, cleanupWorker, dynamicClient, apiextensionsClient, structuralschemaController, customFactory.Celadmissionpolyfill().V0alpha2().PolicyTemplates().Informer()),
+		StartV1Alpha1(serverContext, serverCancel, factory, kubeClient, nil, nil, dynamicClient, nil),
 	}
 
 	// Start HTTP REST server for webhook
 	waitGroup.Add(1)
 	go func() {
-		webhook := webhook.New(locateCertificates(), validator.NewMulti(validators...))
+		webhook := webhook.New(locateCertificates(), clientsetscheme.Scheme, validator.NewMulti(validators...))
 
 		// Set up bindings with cluster automatically if debugging
 		if DEBUG {
@@ -173,12 +182,12 @@ func locateCertificates() webhook.CertInfo {
 	return webhook.CertInfo{}
 }
 
-func StartV1Alpha1(
+func StartV0Alpha1(
 	ctx context.Context,
 	cancelFunc func(),
 	structuralschemaController structuralschema.Controller,
 	informer v0alpha1.ValidationRuleSetInformer,
-) validator.Interface {
+) admission.ValidationInterface {
 
 	if DEBUG {
 		// Install latest CRD definitions
@@ -205,14 +214,14 @@ func StartV1Alpha1(
 	return validator
 }
 
-func StartV1Alpha2(
+func StartV0Alpha2(
 	ctx context.Context,
 	cancelFunc func(),
 	dynamicClient dynamic.Interface,
 	apiextensionsClient apiextensionsclientset.Interface,
 	structuralschemaController structuralschema.Controller,
 	policyTemplatesInformer cache.SharedIndexInformer,
-) validator.Interface {
+) admission.ValidationInterface {
 	if DEBUG {
 		// Install latest CRD definitions
 	}
@@ -233,4 +242,63 @@ func StartV1Alpha2(
 	}()
 
 	return controller
+}
+
+// !TODO: just use the already available plugin
+type celAdmissionPlugin struct {
+	evaluator validatingadmissionpolicy.CELPolicyEvaluator
+}
+
+func (c *celAdmissionPlugin) Handles(operation admission.Operation) bool {
+	return true
+}
+
+func (c *celAdmissionPlugin) Validate(
+	ctx context.Context,
+	a admission.Attributes,
+	o admission.ObjectInterfaces,
+) (err error) {
+	// isPolicyResource determines if an admission.Attributes object is describing
+	// the admission of a ValidatingAdmissionPolicy or a ValidatingAdmissionPolicyBinding
+	if isPolicyResource(a) {
+		return
+	}
+
+	if !c.evaluator.HasSynced() {
+		return admission.NewForbidden(a, fmt.Errorf("not yet ready to handle request"))
+	}
+
+	return c.evaluator.Validate(ctx, a, o)
+}
+
+func isPolicyResource(attr admission.Attributes) bool {
+	gvk := attr.GetResource()
+	if gvk.Group == "admissionregistration.k8s.io" {
+		if gvk.Resource == "validatingadmissionpolicies" || gvk.Resource == "validatingadmissionpolicybindings" {
+			return true
+		}
+	}
+	return false
+}
+
+func StartV1Alpha1(
+	ctx context.Context,
+	cancelFunc func(),
+	factory informers.SharedInformerFactory,
+	client kubernetes.Interface,
+	restMapper meta.RESTMapper,
+	schemaResolver resolver.SchemaResolver,
+	dynamicClient dynamic.Interface,
+	authorizer authorizer.Authorizer,
+) admission.ValidationInterface {
+	controller := validatingadmissionpolicy.NewAdmissionController(
+		factory, client, restMapper, schemaResolver, dynamicClient, authorizer,
+	)
+
+	go func() {
+		go controller.Run(ctx.Done())
+		defer cancelFunc()
+	}()
+
+	return &celAdmissionPlugin{controller}
 }

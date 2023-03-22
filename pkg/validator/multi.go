@@ -1,31 +1,40 @@
 package validator
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	"context"
 
-func NewMulti(validators ...Interface) Interface {
+	"k8s.io/apiserver/pkg/admission"
+)
+
+func NewMulti(validators ...admission.ValidationInterface) admission.ValidationInterface {
 	return multi{validators: validators}
 }
 
 type multi struct {
-	validators []Interface
+	validators []admission.ValidationInterface
 }
 
-func (m multi) Validate(gvr metav1.GroupVersionResource, oldObj, obj interface{}) ValidationResult {
+func (m multi) Handles(operation admission.Operation) bool {
 	for _, v := range m.validators {
+		if v.Handles(operation) {
+			return true
+		}
+	}
+	return false
+}
 
-		err := v.Validate(gvr, oldObj, obj)
+func (m multi) Validate(ctx context.Context, a admission.Attributes, o admission.ObjectInterfaces) error {
+	for _, v := range m.validators {
+		if !v.Handles(a.GetOperation()) {
+			continue
+		}
 
-		// TODO: Allow configuration of multivalidator to vary how it combines
-		// validation
-		//
-		// For now, policy is to return Forbidden if any are explicitly forbidden
-		// otherwise, OK
-		if err.Status == ValidationForbidden {
+		err := v.Validate(ctx, a, o)
+
+		if err != nil {
 			return err
 		}
 	}
 
-	return ValidationResult{
-		Status: ValidationOK,
-	}
+	return nil
 }

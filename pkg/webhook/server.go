@@ -9,12 +9,17 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/alexzielenski/cel_polyfill/pkg/validator"
 	admissionv1 "k8s.io/api/admission/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	authenticationv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apiserver/pkg/admission"
+	"k8s.io/apiserver/pkg/authentication/user"
 	admissionregistrationv1apply "k8s.io/client-go/applyconfigurations/admissionregistration/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -39,17 +44,22 @@ type Interface interface {
 	Run(ctx context.Context) error
 }
 
-func New(certs CertInfo, validator validator.Interface) Interface {
+func New(certs CertInfo, scheme *runtime.Scheme, validator admission.ValidationInterface) Interface {
+	codecs := serializer.NewCodecFactory(scheme)
 	return &webhook{
-		CertInfo:  certs,
-		port:      9091,
-		validator: validator,
+		CertInfo:         certs,
+		objectInferfaces: admission.NewObjectInterfacesFromScheme(scheme),
+		decoder:          codecs.UniversalDeserializer(),
+		port:             9091,
+		validator:        validator,
 	}
 }
 
 type webhook struct {
-	port      uint16
-	validator validator.Interface
+	port             uint16
+	validator        admission.ValidationInterface
+	objectInferfaces admission.ObjectInterfaces
+	decoder          runtime.Decoder
 	CertInfo
 }
 
@@ -164,30 +174,109 @@ func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Reques
 		parsed.Request.Name,
 	)
 
-	var object unstructured.Unstructured
-	var oldObject unstructured.Unstructured
-
-	if len(parsed.Request.OldObject.Raw) > 0 {
-		err = json.Unmarshal(parsed.Request.OldObject.Raw, &oldObject)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}
-
-	if len(parsed.Request.Object.Raw) > 0 {
-		err = json.Unmarshal(parsed.Request.Object.Raw, &object)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}
-
-	verr := wh.validator.Validate(parsed.Request.Resource, &oldObject, &object)
-	allowed := verr.Status == validator.ValidationOK
+	allowed := true
 	errString := "valid"
-	if verr.Error != nil {
-		errString = verr.Error.Error()
+
+	if wh.validator.Handles(admission.Operation(parsed.Request.Operation)) {
+		var object runtime.Object
+		var oldObject runtime.Object
+
+		if len(parsed.Request.OldObject.Raw) > 0 {
+			obj, gvk, err := wh.decoder.Decode(parsed.Request.OldObject.Raw, nil, nil)
+			switch {
+			case gvk == nil || *gvk != parsed.GroupVersionKind():
+				// GVK case first. If object type is unknown it is parsed to
+				// unstructured, but
+				http.Error(w, fmt.Sprintf("unexpected GVK %v. Expected %v", gvk, parsed.GroupVersionKind()), http.StatusBadRequest)
+				return
+			case err != nil && runtime.IsNotRegisteredError(err):
+				var oldUnstructured unstructured.Unstructured
+				err = json.Unmarshal(parsed.Request.OldObject.Raw, &oldUnstructured)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+
+				oldObject = &oldUnstructured
+			case err != nil:
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			default:
+				oldObject = obj
+			}
+		}
+
+		if len(parsed.Request.Object.Raw) > 0 {
+			obj, gvk, err := wh.decoder.Decode(parsed.Request.Object.Raw, nil, nil)
+			switch {
+			case gvk == nil || *gvk != parsed.GroupVersionKind():
+				// GVK case first. If object type is unknown it is parsed to
+				// unstructured, but
+				http.Error(w, fmt.Sprintf("unexpected GVK %v. Expected %v", gvk, parsed.GroupVersionKind()), http.StatusBadRequest)
+				return
+			case err != nil && runtime.IsNotRegisteredError(err):
+				var objUnstructured unstructured.Unstructured
+				err = json.Unmarshal(parsed.Request.Object.Raw, &objUnstructured)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+
+				object = &objUnstructured
+			case err != nil:
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			default:
+				object = obj
+			}
+		}
+
+		// Parse into native types if possible
+		convertExtra := func(input map[string]authenticationv1.ExtraValue) map[string][]string {
+			if input == nil {
+				return nil
+			}
+
+			res := map[string][]string{}
+			for k, v := range input {
+				var converted []string
+				for _, s := range v {
+					converted = append(converted, string(s))
+				}
+				res[k] = converted
+			}
+			return res
+		}
+
+		//!TODO: Parse options as v1.CreateOptions, v1.DeleteOptions, or v1.PatchOptions
+
+		attrs := admission.NewAttributesRecord(
+			object,
+			oldObject,
+			parsed.GroupVersionKind(),
+			parsed.Request.Namespace,
+			parsed.Request.Name,
+			schema.GroupVersionResource{
+				Group:    parsed.Request.Resource.Group,
+				Version:  parsed.Request.Resource.Version,
+				Resource: parsed.Request.Resource.Resource,
+			},
+			parsed.Request.SubResource,
+			admission.Operation(parsed.Request.Operation),
+			nil, // operation options?
+			false,
+			&user.DefaultInfo{
+				Name:   parsed.Request.UserInfo.Username,
+				UID:    parsed.Request.UserInfo.UID,
+				Groups: parsed.Request.UserInfo.Groups,
+				Extra:  convertExtra(parsed.Request.UserInfo.Extra),
+			})
+
+		verr := wh.validator.Validate(context.TODO(), attrs, wh.objectInferfaces)
+		allowed = verr != nil
+		if verr != nil {
+			errString = verr.Error()
+		}
 	}
 
 	var status int32 = http.StatusAccepted

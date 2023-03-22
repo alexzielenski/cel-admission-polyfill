@@ -24,6 +24,7 @@ import (
 	time "time"
 
 	versioned "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned"
+	admissionregistrationpolyfillsigsk8sio "github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions/admissionregistration.polyfill.sigs.k8s.io"
 	celadmissionpolyfillk8sio "github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions/celadmissionpolyfill.k8s.io"
 	internalinterfaces "github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions/internalinterfaces"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -243,7 +244,12 @@ type SharedInformerFactory interface {
 	// client.
 	InformerFor(obj runtime.Object, newFunc internalinterfaces.NewInformerFunc) cache.SharedIndexInformer
 
+	Admissionregistration() admissionregistrationpolyfillsigsk8sio.Interface
 	Celadmissionpolyfill() celadmissionpolyfillk8sio.Interface
+}
+
+func (f *sharedInformerFactory) Admissionregistration() admissionregistrationpolyfillsigsk8sio.Interface {
+	return admissionregistrationpolyfillsigsk8sio.New(f, f.namespace, f.tweakListOptions)
 }
 
 func (f *sharedInformerFactory) Celadmissionpolyfill() celadmissionpolyfillk8sio.Interface {

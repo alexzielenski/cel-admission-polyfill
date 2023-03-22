@@ -19,6 +19,7 @@ limitations under the License.
 package scheme
 
 import (
+	admissionregistrationv1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/apis/admissionregistration.polyfill.sigs.k8s.io/v1alpha1"
 	celadmissionpolyfillv0alpha1 "github.com/alexzielenski/cel_polyfill/pkg/apis/celadmissionpolyfill.k8s.io/v0alpha1"
 	celadmissionpolyfillv0alpha2 "github.com/alexzielenski/cel_polyfill/pkg/apis/celadmissionpolyfill.k8s.io/v0alpha2"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,6 +33,7 @@ var Scheme = runtime.NewScheme()
 var Codecs = serializer.NewCodecFactory(Scheme)
 var ParameterCodec = runtime.NewParameterCodec(Scheme)
 var localSchemeBuilder = runtime.SchemeBuilder{
+	admissionregistrationv1alpha1.AddToScheme,
 	celadmissionpolyfillv0alpha1.AddToScheme,
 	celadmissionpolyfillv0alpha2.AddToScheme,
 }

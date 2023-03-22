@@ -20,6 +20,8 @@ package fake
 
 import (
 	clientset "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned"
+	admissionregistrationv1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/admissionregistration.polyfill.sigs.k8s.io/v1alpha1"
+	fakeadmissionregistrationv1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/admissionregistration.polyfill.sigs.k8s.io/v1alpha1/fake"
 	celadmissionpolyfillv0alpha1 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v0alpha1"
 	fakeceladmissionpolyfillv0alpha1 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v0alpha1/fake"
 	celadmissionpolyfillv0alpha2 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v0alpha2"
@@ -80,6 +82,11 @@ var (
 	_ clientset.Interface = &Clientset{}
 	_ testing.FakeClient  = &Clientset{}
 )
+
+// AdmissionregistrationV1alpha1 retrieves the AdmissionregistrationV1alpha1Client
+func (c *Clientset) AdmissionregistrationV1alpha1() admissionregistrationv1alpha1.AdmissionregistrationV1alpha1Interface {
+	return &fakeadmissionregistrationv1alpha1.FakeAdmissionregistrationV1alpha1{Fake: &c.Fake}
+}
 
 // CeladmissionpolyfillV0alpha1 retrieves the CeladmissionpolyfillV0alpha1Client
 func (c *Clientset) CeladmissionpolyfillV0alpha1() celadmissionpolyfillv0alpha1.CeladmissionpolyfillV0alpha1Interface {

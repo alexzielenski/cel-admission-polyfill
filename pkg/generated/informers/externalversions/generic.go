@@ -21,6 +21,7 @@ package externalversions
 import (
 	"fmt"
 
+	v1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/apis/admissionregistration.polyfill.sigs.k8s.io/v1alpha1"
 	v0alpha1 "github.com/alexzielenski/cel_polyfill/pkg/apis/celadmissionpolyfill.k8s.io/v0alpha1"
 	v0alpha2 "github.com/alexzielenski/cel_polyfill/pkg/apis/celadmissionpolyfill.k8s.io/v0alpha2"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
@@ -53,7 +54,13 @@ func (f *genericInformer) Lister() cache.GenericLister {
 // TODO extend this to unknown resources with a client pool
 func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource) (GenericInformer, error) {
 	switch resource {
-	// Group=celadmissionpolyfill.k8s.io, Version=v0alpha1
+	// Group=admissionregistration.polyfill.sigs.k8s.io, Version=v1alpha1
+	case v1alpha1.SchemeGroupVersion.WithResource("validatingadmissionpolicies"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Admissionregistration().V1alpha1().ValidatingAdmissionPolicies().Informer()}, nil
+	case v1alpha1.SchemeGroupVersion.WithResource("validatingadmissionpolicybindings"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Admissionregistration().V1alpha1().ValidatingAdmissionPolicyBindings().Informer()}, nil
+
+		// Group=celadmissionpolyfill.k8s.io, Version=v0alpha1
 	case v0alpha1.SchemeGroupVersion.WithResource("validationrulesets"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Celadmissionpolyfill().V0alpha1().ValidationRuleSets().Informer()}, nil
 
