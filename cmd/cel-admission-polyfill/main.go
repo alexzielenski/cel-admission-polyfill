@@ -46,6 +46,8 @@ import (
 var DEBUG = true
 
 func main() {
+	klog.EnableContextualLogging(true)
+
 	// Create an overarching context which is cancelled if there is ever an
 	// OS interrupt (eg. Ctrl-C)
 	mainContext, _ := signal.NotifyContext(context.Background(), os.Interrupt)

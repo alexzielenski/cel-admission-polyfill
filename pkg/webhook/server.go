@@ -25,6 +25,8 @@ import (
 	"k8s.io/klog/v2"
 )
 
+var logger klog.Logger = klog.LoggerWithName(klog.Background(), "webhook")
+
 type CertInfo struct {
 	CertFile string
 	KeyFile  string
@@ -143,7 +145,7 @@ func (wh *webhook) Run(ctx context.Context) error {
 	if err := srv.Close(); err != nil {
 		// Errors with gracefully shutting down connections. Not fatal. Server
 		// is still closed.
-		klog.Error(err)
+		logger.Error(err, "shutting down webhook")
 	}
 
 	// Prefer the passed context's error to pick up deadline/cancelled errors
@@ -164,15 +166,26 @@ func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Reques
 	parsed, err := parseRequest(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		logger.Error(err, "parsing admission review request")
 		return
 	}
 
-	klog.Infof(
-		"review request (%s:%s/%s)",
+	logger.Info(
+		"review request",
+		"resource",
 		parsed.Request.Resource.String(),
+		"namespace",
 		parsed.Request.Namespace,
+		"name",
 		parsed.Request.Name,
+		"uid",
+		parsed.Request.UID,
 	)
+
+	failure := func(err error, status int) {
+		http.Error(w, err.Error(), status)
+		logger.Error(err, "review response", "uid", parsed.Request.UID, "status", status)
+	}
 
 	allowed := true
 	errString := "valid"
@@ -184,22 +197,22 @@ func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Reques
 		if len(parsed.Request.OldObject.Raw) > 0 {
 			obj, gvk, err := wh.decoder.Decode(parsed.Request.OldObject.Raw, nil, nil)
 			switch {
-			case gvk == nil || *gvk != parsed.GroupVersionKind():
+			case gvk == nil || *gvk != schema.GroupVersionKind(parsed.Request.Kind):
 				// GVK case first. If object type is unknown it is parsed to
 				// unstructured, but
-				http.Error(w, fmt.Sprintf("unexpected GVK %v. Expected %v", gvk, parsed.GroupVersionKind()), http.StatusBadRequest)
+				failure(fmt.Errorf("unexpected GVK %v. Expected %v", gvk, parsed.Request.Kind), http.StatusBadRequest)
 				return
 			case err != nil && runtime.IsNotRegisteredError(err):
 				var oldUnstructured unstructured.Unstructured
 				err = json.Unmarshal(parsed.Request.OldObject.Raw, &oldUnstructured)
 				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
+					failure(err, http.StatusInternalServerError)
 					return
 				}
 
 				oldObject = &oldUnstructured
 			case err != nil:
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				failure(err, http.StatusBadRequest)
 				return
 			default:
 				oldObject = obj
@@ -209,22 +222,22 @@ func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Reques
 		if len(parsed.Request.Object.Raw) > 0 {
 			obj, gvk, err := wh.decoder.Decode(parsed.Request.Object.Raw, nil, nil)
 			switch {
-			case gvk == nil || *gvk != parsed.GroupVersionKind():
+			case gvk == nil || *gvk != schema.GroupVersionKind(parsed.Request.Kind):
 				// GVK case first. If object type is unknown it is parsed to
 				// unstructured, but
-				http.Error(w, fmt.Sprintf("unexpected GVK %v. Expected %v", gvk, parsed.GroupVersionKind()), http.StatusBadRequest)
+				failure(fmt.Errorf("unexpected GVK %v. Expected %v", gvk, parsed.Request.Kind), http.StatusBadRequest)
 				return
 			case err != nil && runtime.IsNotRegisteredError(err):
 				var objUnstructured unstructured.Unstructured
 				err = json.Unmarshal(parsed.Request.Object.Raw, &objUnstructured)
 				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
+					failure(err, http.StatusInternalServerError)
 					return
 				}
 
 				object = &objUnstructured
 			case err != nil:
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				failure(err, http.StatusBadRequest)
 				return
 			default:
 				object = obj
@@ -253,7 +266,7 @@ func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Reques
 		attrs := admission.NewAttributesRecord(
 			object,
 			oldObject,
-			parsed.GroupVersionKind(),
+			schema.GroupVersionKind(parsed.Request.Kind),
 			parsed.Request.Namespace,
 			parsed.Request.Name,
 			schema.GroupVersionResource{
@@ -273,7 +286,7 @@ func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Reques
 			})
 
 		verr := wh.validator.Validate(context.TODO(), attrs, wh.objectInferfaces)
-		allowed = verr != nil
+		allowed = verr == nil
 		if verr != nil {
 			errString = verr.Error()
 		}
@@ -292,19 +305,26 @@ func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Reques
 
 	out, err := json.Marshal(response)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		failure(err, http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(out)
-	klog.Infof(
-		"review response (%s:%s/%s): %v {%v}",
+	logger.Info(
+		"review response",
+		"resource",
 		parsed.Request.Resource.String(),
+		"namespace",
 		parsed.Request.Namespace,
+		"name",
 		parsed.Request.Name,
+		"allowed",
 		allowed,
+		"msg",
 		errString,
+		"uid",
+		parsed.Request.UID,
 	)
 }
 
