@@ -22,6 +22,7 @@ import (
 	apiextensionsclientsetscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
 	apiextensionsinformers "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
 	"k8s.io/apimachinery/pkg/api/meta"
+	aggregatorclientsetscheme "k8s.io/kube-aggregator/pkg/client/clientset_generated/clientset/scheme"
 
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/admission/plugin/validatingadmissionpolicy"
@@ -52,9 +53,11 @@ func main() {
 		return
 	}
 
-	// TBH not sure the full extent of what this does
-	_ = scheme.AddToScheme(clientsetscheme.Scheme)
-	_ = apiextensionsclientsetscheme.AddToScheme(clientsetscheme.Scheme)
+	// Make the kubernetes clientset scheme aware of all kubernetes types
+	// and our custom CRD types
+	scheme.AddToScheme(clientsetscheme.Scheme)
+	apiextensionsclientsetscheme.AddToScheme(clientsetscheme.Scheme)
+	aggregatorclientsetscheme.AddToScheme(clientsetscheme.Scheme)
 
 	kubeClient, err := kubernetes.NewForConfig(restConfig)
 	// customClient := versioned.New(kubeClient.Discovery().RESTClient())
@@ -107,11 +110,11 @@ func main() {
 		waitGroup.Done()
 	}
 
-	waitGroup.Add(2)
+	waitGroup.Add(1)
 	validators := []admission.ValidationInterface{
 		// StartV0Alpha1(serverContext, cleanupWorker, structuralschemaController, customFactory.Celadmissionpolyfill().V0alpha1().ValidationRuleSets()),
 		// StartV0Alpha2(serverContext, cleanupWorker, dynamicClient, apiextensionsClient, structuralschemaController, customFactory.Celadmissionpolyfill().V0alpha2().PolicyTemplates().Informer()),
-		StartV1Alpha1(serverContext, serverCancel, factory, kubeClient, nil, nil, dynamicClient, nil),
+		StartV1Alpha1(serverContext, cleanupWorker, factory, kubeClient, nil, nil, dynamicClient, nil),
 	}
 
 	// Start HTTP REST server for webhook
@@ -139,6 +142,7 @@ func main() {
 	}()
 
 	// Start after informers have been requested from factory
+	factory.Start(serverContext.Done())
 	apiextensionsFactory.Start(serverContext.Done())
 	customFactory.Start(serverContext.Done())
 
