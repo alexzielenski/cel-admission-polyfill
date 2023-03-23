@@ -11,13 +11,13 @@ spec:
     resourceRules:
     - resourceNames: []
       operations: ["*"]
-      apiGroups: ["*"]
-      apiVersions: ["*"]
-      resources: ["*/*"]
+      apiGroups: [""]
+      apiVersions: ["v1"]
+      resources: ["configmaps"]
 
   paramKind:
     apiVersion: v1
     kind: ConfigMap
   failurePolicy: Fail
   validations:
-  - expression: object.metadata.name.endsWith('k8s')
+  - expression: object.metadata.nam.endsWith('k8s')
