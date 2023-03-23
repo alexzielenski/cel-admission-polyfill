@@ -449,6 +449,9 @@ spec:
                   kind:
                     description: Kind is the API kind the resources belong to. Required.
                     type: string
+                required:
+                - apiVersion
+                - kind
                 type: object
                 x-kubernetes-map-type: atomic
               validations:
@@ -547,6 +550,8 @@ spec:
                   type: object
                 type: array
                 x-kubernetes-list-type: atomic
+            required:
+            - matchConstraints
             type: object
           status:
             description: The status of the ValidatingAdmissionPolicy, including warnings

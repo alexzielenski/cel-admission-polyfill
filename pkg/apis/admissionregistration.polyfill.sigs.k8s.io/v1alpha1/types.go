@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 // COPIED FROMK8S SOURCE
-// Modified to include kuberbuilder status tags
+// Modified to include kuberbuilder status tags, cluster scoping, api-approved annotation, required fields
 
 package v1alpha1
 
@@ -154,7 +154,7 @@ type ValidatingAdmissionPolicySpec struct {
 	// ValidatingAdmissionPolicy cannot match ValidatingAdmissionPolicy and ValidatingAdmissionPolicyBinding.
 	// Required.
 	// +kubebuilder:validation:Required
-	MatchConstraints *MatchResources `json:"matchConstraints,omitempty" protobuf:"bytes,2,rep,name=matchConstraints"`
+	MatchConstraints *MatchResources `json:"matchConstraints" protobuf:"bytes,2,rep,name=matchConstraints"`
 
 	// Validations contain CEL expressions which is used to apply the validation.
 	// Validations and AuditAnnotations may not both be empty; a minimum of one Validations or AuditAnnotations is
@@ -219,12 +219,12 @@ type ParamKind struct {
 	// In format of "group/version".
 	// Required.
 	// +kubebuilder:validation:Required
-	APIVersion string `json:"apiVersion,omitempty" protobuf:"bytes,1,rep,name=apiVersion"`
+	APIVersion string `json:"apiVersion" protobuf:"bytes,1,rep,name=apiVersion"`
 
 	// Kind is the API kind the resources belong to.
 	// Required.
 	// +kubebuilder:validation:Required
-	Kind string `json:"kind,omitempty" protobuf:"bytes,2,rep,name=kind"`
+	Kind string `json:"kind" protobuf:"bytes,2,rep,name=kind"`
 }
 
 // Validation specifies the CEL expression which is used to apply the validation.
@@ -376,7 +376,7 @@ type ValidatingAdmissionPolicyBindingSpec struct {
 	// If the referenced resource does not exist, this binding is considered invalid and will be ignored
 	// Required.
 	// +kubebuilder:validation:Required
-	PolicyName string `json:"policyName,omitempty" protobuf:"bytes,1,rep,name=policyName"`
+	PolicyName string `json:"policyName" protobuf:"bytes,1,rep,name=policyName"`
 
 	// ParamRef specifies the parameter resource used to configure the admission control policy.
 	// It should point to a resource of the type specified in ParamKind of the bound ValidatingAdmissionPolicy.
