@@ -100,7 +100,7 @@ func (r *Controller) purgeCRDFromCache(gk schema.GroupKind) {
 
 func (r *Controller) resolveSchemaFromCache(gvk schema.GroupVersionKind) (bool, *spec.Schema, error) {
 	r.lock.RLock()
-	defer r.lock.Unlock()
+	defer r.lock.RUnlock()
 
 	entry, exists := r.cache[gvk]
 	return exists, entry.schema, entry.error
