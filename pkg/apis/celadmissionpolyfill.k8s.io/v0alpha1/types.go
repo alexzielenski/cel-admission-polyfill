@@ -8,7 +8,7 @@ import (
 // +genclient
 // +geninformer
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-
+// +kubebuilder:metadata:annotations="api-approved.kubernetes.io=unapproved, request not yet submitted"
 type ValidationRuleSet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

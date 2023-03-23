@@ -70,6 +70,7 @@ const (
 // +k8s:prerelease-lifecycle-gen:introduced=1.26
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:metadata:annotations="api-approved.kubernetes.io=unapproved, request not yet submitted"
 // ValidatingAdmissionPolicy describes the definition of an admission validation policy that accepts or rejects an object without changing it.
 type ValidatingAdmissionPolicy struct {
 	metav1.TypeMeta `json:",inline"`
@@ -335,7 +336,7 @@ type AuditAnnotation struct {
 // +genclient:nonNamespaced
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:prerelease-lifecycle-gen:introduced=1.26
-
+// +kubebuilder:metadata:annotations="api-approved.kubernetes.io=unapproved, request not yet submitted"
 // ValidatingAdmissionPolicyBinding binds the ValidatingAdmissionPolicy with paramerized resources.
 // ValidatingAdmissionPolicyBinding and parameter CRDs together define how cluster administrators configure policies for clusters.
 type ValidatingAdmissionPolicyBinding struct {
