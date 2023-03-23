@@ -14,6 +14,7 @@ require (
 	k8s.io/code-generator v0.27.0-beta.0
 	k8s.io/klog/v2 v2.90.1
 	k8s.io/kube-aggregator v0.26.3
+	k8s.io/kube-openapi v0.0.0-20230308215209-15aac26d736a
 	sigs.k8s.io/controller-tools v0.9.2
 )
 
@@ -73,7 +74,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/component-base v0.27.0-beta.0 // indirect
 	k8s.io/gengo v0.0.0-20220902162205-c0856e24416d // indirect
-	k8s.io/kube-openapi v0.0.0-20230308215209-15aac26d736a // indirect
 	k8s.io/utils v0.0.0-20230209194617-a36077c30491 // indirect
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.3 // indirect

@@ -11,6 +11,7 @@ import (
 	"github.com/alexzielenski/cel_polyfill"
 	controllerv0alpha1 "github.com/alexzielenski/cel_polyfill/pkg/controller/celadmissionpolyfill.k8s.io/v0alpha1"
 	controllerv0alpha2 "github.com/alexzielenski/cel_polyfill/pkg/controller/celadmissionpolyfill.k8s.io/v0alpha2"
+	"github.com/alexzielenski/cel_polyfill/pkg/controller/schemaresolver"
 	"github.com/alexzielenski/cel_polyfill/pkg/controller/structuralschema"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/scheme"
@@ -22,6 +23,7 @@ import (
 	apiextensionsclientsetscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
 	apiextensionsinformers "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/util/wait"
 	aggregatorclientsetscheme "k8s.io/kube-aggregator/pkg/client/clientset_generated/clientset/scheme"
 
 	"k8s.io/apiserver/pkg/admission"
@@ -33,6 +35,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
@@ -96,6 +99,20 @@ func main() {
 	customFactory := externalversions.NewSharedInformerFactory(customClient, 30*time.Second)
 	apiextensionsFactory := apiextensionsinformers.NewSharedInformerFactory(apiextensionsClient, 30*time.Second)
 
+	restmapper := meta.NewLazyRESTMapperLoader(func() (meta.RESTMapper, error) {
+		groupResources, err := restmapper.GetAPIGroupResources(kubeClient.Discovery())
+		if err != nil {
+			return nil, err
+		}
+		return restmapper.NewDiscoveryRESTMapper(groupResources), nil
+	}).(meta.ResettableRESTMapper)
+
+	go wait.PollUntil(1*time.Minute, func() (done bool, err error) {
+		// Refresh restmapper every minute
+		restmapper.Reset()
+		return false, nil
+	}, serverContext.Done())
+
 	// structuralschemaController := structuralschema.NewController(
 	// 	apiextensionsFactory.Apiextensions().V1().CustomResourceDefinitions().Informer(),
 	// )
@@ -114,7 +131,7 @@ func main() {
 	validators := []admission.ValidationInterface{
 		// StartV0Alpha1(serverContext, cleanupWorker, structuralschemaController, customFactory.Celadmissionpolyfill().V0alpha1().ValidationRuleSets()),
 		// StartV0Alpha2(serverContext, cleanupWorker, dynamicClient, apiextensionsClient, structuralschemaController, customFactory.Celadmissionpolyfill().V0alpha2().PolicyTemplates().Informer()),
-		StartV1Alpha1(serverContext, cleanupWorker, factory, kubeClient, nil, nil, dynamicClient, nil),
+		StartV1Alpha1(serverContext, cleanupWorker, factory, kubeClient, restmapper, schemaresolver.New(apiextensionsFactory.Apiextensions().V1().CustomResourceDefinitions(), kubeClient.Discovery()), dynamicClient, nil),
 	}
 
 	// Start HTTP REST server for webhook
@@ -300,8 +317,8 @@ func StartV1Alpha1(
 	)
 
 	go func() {
-		go controller.Run(ctx.Done())
 		defer cancelFunc()
+		controller.Run(ctx.Done())
 	}()
 
 	return &celAdmissionPlugin{controller}
