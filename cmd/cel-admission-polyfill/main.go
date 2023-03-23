@@ -5,16 +5,19 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"reflect"
 	"sync"
 	"time"
 
 	"github.com/alexzielenski/cel_polyfill"
+	"github.com/alexzielenski/cel_polyfill/pkg/apis/admissionregistration.polyfill.sigs.k8s.io/v1alpha1"
 	controllerv0alpha1 "github.com/alexzielenski/cel_polyfill/pkg/controller/celadmissionpolyfill.k8s.io/v0alpha1"
 	controllerv0alpha2 "github.com/alexzielenski/cel_polyfill/pkg/controller/celadmissionpolyfill.k8s.io/v0alpha2"
 	"github.com/alexzielenski/cel_polyfill/pkg/controller/schemaresolver"
 	"github.com/alexzielenski/cel_polyfill/pkg/controller/structuralschema"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/scheme"
+	admissionregistrationpolyfillclient "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/admissionregistration.polyfill.sigs.k8s.io/v1alpha1"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions"
 	"github.com/alexzielenski/cel_polyfill/pkg/generated/informers/externalversions/celadmissionpolyfill.k8s.io/v0alpha1"
 	"github.com/alexzielenski/cel_polyfill/pkg/validator"
@@ -23,13 +26,20 @@ import (
 	apiextensionsclientsetscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
 	apiextensionsinformers "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/watch"
+	admissionregistrationv1alpha1 "k8s.io/client-go/kubernetes/typed/admissionregistration/v1alpha1"
 	aggregatorclientsetscheme "k8s.io/kube-aggregator/pkg/client/clientset_generated/clientset/scheme"
 
+	admissionregistrationv1alpha1types "k8s.io/api/admissionregistration/v1alpha1"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/admission/plugin/validatingadmissionpolicy"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
 	"k8s.io/apiserver/pkg/cel/openapi/resolver"
+	admissionregistrationv1alpha1apply "k8s.io/client-go/applyconfigurations/admissionregistration/v1alpha1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -40,6 +50,275 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 )
+
+type ClientInterface[T runtime.Object, TList runtime.Object, TApplyConfiguration any] interface {
+	Create(ctx context.Context, object T, opts metav1.CreateOptions) (T, error)
+	Update(ctx context.Context, object T, opts metav1.UpdateOptions) (T, error)
+	Delete(ctx context.Context, name string, opts metav1.DeleteOptions) error
+	DeleteCollection(ctx context.Context, opts metav1.DeleteOptions, listOpts metav1.ListOptions) error
+	Get(ctx context.Context, name string, opts metav1.GetOptions) (T, error)
+	List(ctx context.Context, opts metav1.ListOptions) (TList, error)
+	Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error)
+	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result T, err error)
+}
+
+type ClientInterfaceWithApply[T runtime.Object, TList runtime.Object, TApplyConfiguration any] interface {
+	ClientInterface[T, TList, TApplyConfiguration]
+	Apply(ctx context.Context, object TApplyConfiguration, opts metav1.ApplyOptions) (result T, err error)
+}
+
+type ClientInterfaceWithStatus[T runtime.Object, TList runtime.Object, TApplyConfiguration any] interface {
+	ClientInterface[T, TList, TApplyConfiguration]
+	UpdateStatus(ctx context.Context, object T, opts metav1.UpdateOptions) (T, error)
+}
+
+type ClientInterfaceWithStatusAndApply[T runtime.Object, TList runtime.Object, TApplyConfiguration any] interface {
+	ClientInterfaceWithStatus[T, TList, TApplyConfiguration]
+	ClientInterfaceWithApply[T, TList, TApplyConfiguration]
+	ApplyStatus(ctx context.Context, object TApplyConfiguration, opts metav1.ApplyOptions) (result T, err error)
+}
+
+type TransformedClient[T runtime.Object, TList runtime.Object, TApplyConfiguration any, R runtime.Object, RList runtime.Object, RApplyConfiguration any] struct {
+	TargetClient      ClientInterface[T, TList, TApplyConfiguration]
+	ReplacementClient ClientInterface[R, RList, RApplyConfiguration]
+
+	To   func(R) (T, error)
+	From func(T) (R, error)
+}
+
+func (c TransformedClient[T, TList, TApplyConfiguration, R, RList, RApplyConfiguration]) Create(ctx context.Context, object T, opts metav1.CreateOptions) (T, error) {
+	// Go generics doesn't let us return nil here since T may be a value
+	var nilT T
+	converted, err := c.From(object)
+	if err != nil {
+		return nilT, err
+	}
+
+	replacementValue, err := c.ReplacementClient.Create(ctx, converted, opts)
+	if err != nil {
+		return nilT, err
+	}
+
+	convertedResult, err := c.To(replacementValue)
+	if err != nil {
+		return nilT, err
+	}
+
+	return convertedResult, nil
+}
+
+func (c TransformedClient[T, TList, TApplyConfiguration, R, RList, RApplyConfiguration]) Update(ctx context.Context, object T, opts metav1.UpdateOptions) (T, error) {
+	var nilT T
+	converted, err := c.From(object)
+	if err != nil {
+		return nilT, err
+	}
+
+	replacementValue, err := c.ReplacementClient.Update(ctx, converted, opts)
+	if err != nil {
+		return nilT, err
+	}
+
+	convertedResult, err := c.To(replacementValue)
+	if err != nil {
+		return nilT, err
+	}
+
+	return convertedResult, nil
+}
+
+func (c TransformedClient[T, TList, TApplyConfiguration, R, RList, RApplyConfiguration]) UpdateStatus(ctx context.Context, object T, opts metav1.UpdateOptions) (T, error) {
+	var nilT T
+	converted, err := c.From(object)
+	if err != nil {
+		return nilT, err
+	}
+
+	replacementValue, err := c.ReplacementClient.(ClientInterfaceWithStatus[R, RList, RApplyConfiguration]).UpdateStatus(ctx, converted, opts)
+	if err != nil {
+		return nilT, err
+	}
+
+	convertedResult, err := c.To(replacementValue)
+	if err != nil {
+		return nilT, err
+	}
+
+	return convertedResult, nil
+}
+
+func (c TransformedClient[T, TList, TApplyConfiguration, R, RList, RApplyConfiguration]) Delete(ctx context.Context, name string, opts metav1.DeleteOptions) error {
+	return c.ReplacementClient.Delete(ctx, name, opts)
+}
+
+func (c TransformedClient[T, TList, TApplyConfiguration, R, RList, RApplyConfiguration]) DeleteCollection(ctx context.Context, opts metav1.DeleteOptions, listOpts metav1.ListOptions) error {
+	return c.ReplacementClient.DeleteCollection(ctx, opts, listOpts)
+}
+
+func (c TransformedClient[T, TList, TApplyConfiguration, R, RList, RApplyConfiguration]) Get(ctx context.Context, name string, opts metav1.GetOptions) (T, error) {
+	var nilT T
+
+	replacementValue, err := c.ReplacementClient.Get(ctx, name, opts)
+	if err != nil {
+		return nilT, err
+	}
+
+	convertedResult, err := c.To(replacementValue)
+	if err != nil {
+		return nilT, err
+	}
+
+	return convertedResult, nil
+}
+
+func (c TransformedClient[T, TList, TApplyConfiguration, R, RList, RApplyConfiguration]) List(ctx context.Context, opts metav1.ListOptions) (TList, error) {
+	var nilTList TList
+	value, err := c.ReplacementClient.List(ctx, opts)
+	if err != nil {
+		return nilTList, err
+	}
+
+	items := getItems[R](value)
+
+	newItems := make([]T, len(items))
+	for i, v := range items {
+		converted, err := c.To(v)
+		if err != nil {
+			return nilTList, err
+		}
+
+		newItems[i] = converted
+	}
+
+	return listWithItems[TList, T](newItems), nil
+}
+
+func (c TransformedClient[T, TList, TApplyConfiguration, R, RList, RApplyConfiguration]) Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+	watcher, err := c.ReplacementClient.Watch(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	return watch.Filter(watcher, func(in watch.Event) (out watch.Event, keep bool) {
+		converted, err := c.To(in.Object.(R))
+		if err != nil {
+			klog.Error(err)
+			return in, false
+		}
+		in.Object = converted
+		return in, true
+	}), nil
+}
+
+func (c TransformedClient[T, TList, TApplyConfiguration, R, RList, RApplyConfiguration]) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result T, err error) {
+	panic("transform patch unsupported")
+}
+
+func (c TransformedClient[T, TList, TApplyConfiguration, R, RList, RApplyConfiguration]) Apply(ctx context.Context, object TApplyConfiguration, opts metav1.ApplyOptions) (result T, err error) {
+	panic("transform apply unsupported")
+}
+
+func (c TransformedClient[T, TList, TApplyConfiguration, R, RList, RApplyConfiguration]) ApplyStatus(ctx context.Context, object TApplyConfiguration, opts metav1.ApplyOptions) (result T, err error) {
+	panic("transform applystatus unsupported")
+}
+
+func listWithItems[T runtime.Object, V any](items []V) T {
+	// res := make([]T, 1)
+	resVal := reflect.New(reflect.TypeOf([]T{}).Elem().Elem())
+	// ptrType := resVal.Type()
+	inner := resVal.Elem().Type()
+	newListValue := reflect.New(inner).Elem()
+	itemsField := newListValue.FieldByName("Items")
+	itemsField.SetLen(len(items))
+	for i, v := range items {
+		itemsField.Index(i).Set(reflect.ValueOf(v).Elem())
+	}
+	resVal.Elem().Set(newListValue)
+	return resVal.Interface().(T)
+}
+
+func getItems[T runtime.Object](listObj runtime.Object) []T {
+	// Rip items from list
+	// Don't see a better way other than reflection
+	rVal := reflect.ValueOf(listObj)
+	itemsField := rVal.Elem().FieldByName("Items")
+	if itemsField.IsNil() || itemsField.IsZero() {
+		return nil
+	}
+
+	var res []T
+	for i := 0; i < itemsField.Len(); i++ {
+		v := itemsField.Index(i)
+		vp := reflect.New(reflect.PtrTo(v.Type()))
+		vp.Elem().Set(v)
+
+		res = append(res, vp.Interface().(T))
+	}
+
+	return res
+}
+
+func setItems[T runtime.Object](listObj runtime.Object, items []T) {
+	// Rip items from list
+	// Don't see a better way other than reflection
+	rVal := reflect.ValueOf(listObj)
+	itemsField := rVal.Elem().FieldByName("Items")
+	itemsField.Set(reflect.ValueOf(items))
+}
+
+// var x interface{}
+
+// var _ ClientInterfaceWithStatus[*admissionregistrationv1alpha1types.ValidatingAdmissionPolicy, *admissionregistrationv1alpha1types.ValidatingAdmissionPolicyList, *admissionregistrationv1alpha1apply.ValidatingAdmissionPolicyApplyConfiguration] = (&admissionregistrationv1alpha1.AdmissionregistrationV1alpha1Client{}).ValidatingAdmissionPolicies()
+// var _ admissionregistrationv1alpha1.ValidatingAdmissionPolicyInterface = (x.(interface{})).(ClientInterfaceWithStatusAndApply[*admissionregistrationv1alpha1types.ValidatingAdmissionPolicy, *admissionregistrationv1alpha1types.ValidatingAdmissionPolicyList, *admissionregistrationv1alpha1apply.ValidatingAdmissionPolicyApplyConfiguration])
+
+// type TransformClient[T runtime.Object, TList runtime.Object, ]
+
+type replacedClient struct {
+	admissionregistrationv1alpha1.AdmissionregistrationV1alpha1Interface
+	replacement admissionregistrationpolyfillclient.AdmissionregistrationV1alpha1Interface
+}
+
+func (r replacedClient) ValidatingAdmissionPolicies() admissionregistrationv1alpha1.ValidatingAdmissionPolicyInterface {
+	return TransformedClient[
+		*admissionregistrationv1alpha1types.ValidatingAdmissionPolicy, *admissionregistrationv1alpha1types.ValidatingAdmissionPolicyList, *admissionregistrationv1alpha1apply.ValidatingAdmissionPolicyApplyConfiguration,
+		*v1alpha1.ValidatingAdmissionPolicy, *v1alpha1.ValidatingAdmissionPolicyList, any]{
+		TargetClient:      r.AdmissionregistrationV1alpha1Interface.ValidatingAdmissionPolicies(),
+		ReplacementClient: r.replacement.ValidatingAdmissionPolicies(),
+		From: func(vap *admissionregistrationv1alpha1types.ValidatingAdmissionPolicy) (*v1alpha1.ValidatingAdmissionPolicy, error) {
+			return nil, nil
+		},
+		To: func(vap *v1alpha1.ValidatingAdmissionPolicy) (*admissionregistrationv1alpha1types.ValidatingAdmissionPolicy, error) {
+			return nil, nil
+		},
+	}
+}
+
+func (r replacedClient) ValidatingAdmissionPolicyBindings() admissionregistrationv1alpha1.ValidatingAdmissionPolicyBindingInterface {
+	return TransformedClient[
+		*admissionregistrationv1alpha1types.ValidatingAdmissionPolicyBinding, *admissionregistrationv1alpha1types.ValidatingAdmissionPolicyBindingList, *admissionregistrationv1alpha1apply.ValidatingAdmissionPolicyBindingApplyConfiguration,
+		*v1alpha1.ValidatingAdmissionPolicyBinding, *v1alpha1.ValidatingAdmissionPolicyBindingList, any]{
+		TargetClient:      r.AdmissionregistrationV1alpha1Interface.ValidatingAdmissionPolicyBindings(),
+		ReplacementClient: r.replacement.ValidatingAdmissionPolicyBindings(),
+		From: func(vapb *admissionregistrationv1alpha1types.ValidatingAdmissionPolicyBinding) (*v1alpha1.ValidatingAdmissionPolicyBinding, error) {
+			return nil, nil
+		},
+		To: func(vapb *v1alpha1.ValidatingAdmissionPolicyBinding) (*admissionregistrationv1alpha1types.ValidatingAdmissionPolicyBinding, error) {
+			return nil, nil
+		},
+	}
+}
+
+type wrappedClient struct {
+	kubernetes.Interface
+	replacement admissionregistrationpolyfillclient.AdmissionregistrationV1alpha1Interface
+}
+
+func (w wrappedClient) AdmissionregistrationV1alpha1() admissionregistrationv1alpha1.AdmissionregistrationV1alpha1Interface {
+	return replacedClient{
+		replacement:                            w.replacement,
+		AdmissionregistrationV1alpha1Interface: w.Interface.AdmissionregistrationV1alpha1(),
+	}
+}
 
 // Global K8s webhook which respects policy rules
 
@@ -64,22 +343,28 @@ func main() {
 	apiextensionsclientsetscheme.AddToScheme(clientsetscheme.Scheme)
 	aggregatorclientsetscheme.AddToScheme(clientsetscheme.Scheme)
 
-	kubeClient, err := kubernetes.NewForConfig(restConfig)
+	customClient, err := versioned.NewForConfig(restConfig)
+	if err != nil {
+		klog.Errorf("Failed to create crd client: %v", err)
+		return
+	}
+
+	unwrappedKubeClient, err := kubernetes.NewForConfig(restConfig)
 	// customClient := versioned.New(kubeClient.Discovery().RESTClient())
 	if err != nil {
 		fmt.Printf("Failed to create kubernetes client: %v", err)
 		return
 	}
 
+	// Override the typed validating admission policy client in the kubeClient
+	kubeClient := wrappedClient{
+		Interface:   unwrappedKubeClient,
+		replacement: customClient.AdmissionregistrationV1alpha1(),
+	}
+
 	dynamicClient, err := dynamic.NewForConfig(restConfig)
 	if err != nil {
 		klog.Errorf("Failed to create dynamic client: %v", err)
-		return
-	}
-
-	customClient, err := versioned.NewForConfig(restConfig)
-	if err != nil {
-		klog.Errorf("Failed to create crd client: %v", err)
 		return
 	}
 
