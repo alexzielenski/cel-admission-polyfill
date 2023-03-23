@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -200,12 +201,16 @@ func (c TransformedClient[T, TList, TApplyConfiguration, R, RList, RApplyConfigu
 	}
 
 	return watch.Filter(watcher, func(in watch.Event) (out watch.Event, keep bool) {
-		converted, err := c.To(in.Object.(R))
-		if err != nil {
-			klog.Error(err)
-			return in, false
+		if asR, ok := in.Object.(R); ok {
+			converted, err := c.To(asR)
+			if err != nil {
+				klog.Error(err)
+				return in, false
+			}
+			in.Object = converted
+		} else {
+			fmt.Println(in)
 		}
-		in.Object = converted
 		return in, true
 	}), nil
 }
@@ -223,18 +228,28 @@ func (c TransformedClient[T, TList, TApplyConfiguration, R, RList, RApplyConfigu
 }
 
 func listWithItems[T runtime.Object, V any](items []V) T {
-	// res := make([]T, 1)
-	resVal := reflect.New(reflect.TypeOf([]T{}).Elem().Elem())
+	var zero T
+
+	// reflect.TypeOf(zero) is giving me *T. Is this expected?
+	tZero := reflect.New(reflect.TypeOf(zero).Elem())
 	// ptrType := resVal.Type()
-	inner := resVal.Elem().Type()
+	inner := tZero.Elem().Type()
 	newListValue := reflect.New(inner).Elem()
 	itemsField := newListValue.FieldByName("Items")
-	itemsField.SetLen(len(items))
-	for i, v := range items {
-		itemsField.Index(i).Set(reflect.ValueOf(v).Elem())
+	newItems := reflect.New(itemsField.Type()).Elem()
+	for _, v := range items {
+		inner := reflect.ValueOf(v)
+		if inner.IsNil() {
+			panic("converter returned nil?")
+		} else if inner.Kind() != reflect.Ptr {
+			panic("wrong inner type")
+		}
+		newItems = reflect.Append(newItems, inner.Elem())
 	}
-	resVal.Elem().Set(newListValue)
-	return resVal.Interface().(T)
+
+	itemsField.Set(newItems)
+	tZero.Elem().Set(newListValue)
+	return tZero.Interface().(T)
 }
 
 func getItems[T runtime.Object](listObj runtime.Object) []T {
@@ -249,7 +264,7 @@ func getItems[T runtime.Object](listObj runtime.Object) []T {
 	var res []T
 	for i := 0; i < itemsField.Len(); i++ {
 		v := itemsField.Index(i)
-		vp := reflect.New(reflect.PtrTo(v.Type()))
+		vp := reflect.New(reflect.PtrTo(v.Type()).Elem())
 		vp.Elem().Set(v)
 
 		res = append(res, vp.Interface().(T))
@@ -259,6 +274,7 @@ func getItems[T runtime.Object](listObj runtime.Object) []T {
 }
 
 func setItems[T runtime.Object](listObj runtime.Object, items []T) {
+	fmt.Println("set items")
 	// Rip items from list
 	// Don't see a better way other than reflection
 	rVal := reflect.ValueOf(listObj)
@@ -284,12 +300,8 @@ func (r replacedClient) ValidatingAdmissionPolicies() admissionregistrationv1alp
 		*v1alpha1.ValidatingAdmissionPolicy, *v1alpha1.ValidatingAdmissionPolicyList, any]{
 		TargetClient:      r.AdmissionregistrationV1alpha1Interface.ValidatingAdmissionPolicies(),
 		ReplacementClient: r.replacement.ValidatingAdmissionPolicies(),
-		From: func(vap *admissionregistrationv1alpha1types.ValidatingAdmissionPolicy) (*v1alpha1.ValidatingAdmissionPolicy, error) {
-			return nil, nil
-		},
-		To: func(vap *v1alpha1.ValidatingAdmissionPolicy) (*admissionregistrationv1alpha1types.ValidatingAdmissionPolicy, error) {
-			return nil, nil
-		},
+		To:                CRDToNativePolicy,
+		From:              NativeToCRDPolicy,
 	}
 }
 
@@ -299,12 +311,8 @@ func (r replacedClient) ValidatingAdmissionPolicyBindings() admissionregistratio
 		*v1alpha1.ValidatingAdmissionPolicyBinding, *v1alpha1.ValidatingAdmissionPolicyBindingList, any]{
 		TargetClient:      r.AdmissionregistrationV1alpha1Interface.ValidatingAdmissionPolicyBindings(),
 		ReplacementClient: r.replacement.ValidatingAdmissionPolicyBindings(),
-		From: func(vapb *admissionregistrationv1alpha1types.ValidatingAdmissionPolicyBinding) (*v1alpha1.ValidatingAdmissionPolicyBinding, error) {
-			return nil, nil
-		},
-		To: func(vapb *v1alpha1.ValidatingAdmissionPolicyBinding) (*admissionregistrationv1alpha1types.ValidatingAdmissionPolicyBinding, error) {
-			return nil, nil
-		},
+		To:                CRDToNativePolicyBinding,
+		From:              NativeToCRDPolicyBinding,
 	}
 }
 
@@ -318,6 +326,78 @@ func (w wrappedClient) AdmissionregistrationV1alpha1() admissionregistrationv1al
 		replacement:                            w.replacement,
 		AdmissionregistrationV1alpha1Interface: w.Interface.AdmissionregistrationV1alpha1(),
 	}
+}
+
+func NativeToCRDPolicy(vap *admissionregistrationv1alpha1types.ValidatingAdmissionPolicy) (*v1alpha1.ValidatingAdmissionPolicy, error) {
+	if vap == nil {
+		return nil, nil
+	}
+
+	// I'm very lazy so let's just do JSON conversion for now :)
+	toJson, err := json.Marshal(vap)
+	if err != nil {
+		return nil, err
+	}
+	var res v1alpha1.ValidatingAdmissionPolicy
+	err = json.Unmarshal(toJson, &res)
+	if len(res.APIVersion) > 0 {
+		res.APIVersion = "admissionregistration.polyfill.sigs.k8s.io/v1alpha1"
+	}
+	return &res, err
+}
+
+func CRDToNativePolicy(vap *v1alpha1.ValidatingAdmissionPolicy) (*admissionregistrationv1alpha1types.ValidatingAdmissionPolicy, error) {
+	if vap == nil {
+		return nil, nil
+	}
+
+	// I'm very lazy so let's just do JSON conversion for now :)
+	toJson, err := json.Marshal(vap)
+	if err != nil {
+		return nil, err
+	}
+	var res admissionregistrationv1alpha1types.ValidatingAdmissionPolicy
+	err = json.Unmarshal(toJson, &res)
+	if len(res.APIVersion) > 0 {
+		res.APIVersion = "apiregistration.k8s.io/v1alpha1"
+	}
+	return &res, err
+}
+
+func NativeToCRDPolicyBinding(vap *admissionregistrationv1alpha1types.ValidatingAdmissionPolicyBinding) (*v1alpha1.ValidatingAdmissionPolicyBinding, error) {
+	if vap == nil {
+		return nil, nil
+	}
+
+	// I'm very lazy so let's just do JSON conversion for now :)
+	toJson, err := json.Marshal(vap)
+	if err != nil {
+		return nil, err
+	}
+	var res v1alpha1.ValidatingAdmissionPolicyBinding
+	err = json.Unmarshal(toJson, &res)
+	if len(res.APIVersion) > 0 {
+		res.APIVersion = "admissionregistration.polyfill.sigs.k8s.io/v1alpha1"
+	}
+	return &res, err
+}
+
+func CRDToNativePolicyBinding(vap *v1alpha1.ValidatingAdmissionPolicyBinding) (*admissionregistrationv1alpha1types.ValidatingAdmissionPolicyBinding, error) {
+	if vap == nil {
+		return nil, nil
+	}
+
+	// I'm very lazy so let's just do JSON conversion for now :)
+	toJson, err := json.Marshal(vap)
+	if err != nil {
+		return nil, err
+	}
+	var res admissionregistrationv1alpha1types.ValidatingAdmissionPolicyBinding
+	err = json.Unmarshal(toJson, &res)
+	if len(res.APIVersion) > 0 {
+		res.APIVersion = "apiregistration.k8s.io/v1alpha1"
+	}
+	return &res, err
 }
 
 // Global K8s webhook which respects policy rules
@@ -581,7 +661,7 @@ func (c *celAdmissionPlugin) Validate(
 
 func isPolicyResource(attr admission.Attributes) bool {
 	gvk := attr.GetResource()
-	if gvk.Group == "admissionregistration.k8s.io" {
+	if gvk.Group == "admissionregistration.k8s.io" || gvk.Group == "admissionregistration.polyfill.sigs.k8s.io" {
 		if gvk.Resource == "validatingadmissionpolicies" || gvk.Resource == "validatingadmissionpolicybindings" {
 			return true
 		}
