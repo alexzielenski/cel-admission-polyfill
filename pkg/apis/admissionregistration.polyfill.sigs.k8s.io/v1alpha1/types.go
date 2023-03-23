@@ -70,6 +70,7 @@ const (
 // +k8s:prerelease-lifecycle-gen:introduced=1.26
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Cluster
 // +kubebuilder:metadata:annotations="api-approved.kubernetes.io=unapproved, request not yet submitted"
 // ValidatingAdmissionPolicy describes the definition of an admission validation policy that accepts or rejects an object without changing it.
 type ValidatingAdmissionPolicy struct {
@@ -152,6 +153,7 @@ type ValidatingAdmissionPolicySpec struct {
 	// However, in order to prevent clusters from being put into an unstable state that cannot be recovered from via the API
 	// ValidatingAdmissionPolicy cannot match ValidatingAdmissionPolicy and ValidatingAdmissionPolicyBinding.
 	// Required.
+	// +kubebuilder:validation:Required
 	MatchConstraints *MatchResources `json:"matchConstraints,omitempty" protobuf:"bytes,2,rep,name=matchConstraints"`
 
 	// Validations contain CEL expressions which is used to apply the validation.
@@ -216,10 +218,12 @@ type ParamKind struct {
 	// APIVersion is the API group version the resources belong to.
 	// In format of "group/version".
 	// Required.
+	// +kubebuilder:validation:Required
 	APIVersion string `json:"apiVersion,omitempty" protobuf:"bytes,1,rep,name=apiVersion"`
 
 	// Kind is the API kind the resources belong to.
 	// Required.
+	// +kubebuilder:validation:Required
 	Kind string `json:"kind,omitempty" protobuf:"bytes,2,rep,name=kind"`
 }
 
@@ -263,6 +267,7 @@ type Validation struct {
 	//     are overwritten by values in `Y` when the key sets of `X` and `Y` intersect. Elements in `Y` with
 	//     non-intersecting keys are appended, retaining their partial order.
 	// Required.
+	// +kubebuilder:validation:Required
 	Expression string `json:"expression" protobuf:"bytes,1,opt,name=Expression"`
 	// Message represents the message displayed when validation fails. The message is required if the Expression contains
 	// line breaks. The message must not contain line breaks.
@@ -312,6 +317,7 @@ type AuditAnnotation struct {
 	// will be discarded.
 	//
 	// Required.
+	// +kubebuilder:validation:Required
 	Key string `json:"key" protobuf:"bytes,1,opt,name=key"`
 
 	// valueExpression represents the expression which is evaluated by CEL to
@@ -329,6 +335,7 @@ type AuditAnnotation struct {
 	// will be joined together in a comma-separated list.
 	//
 	// Required.
+	// +kubebuilder:validation:Required
 	ValueExpression string `json:"valueExpression" protobuf:"bytes,2,opt,name=valueExpression"`
 }
 
@@ -336,6 +343,7 @@ type AuditAnnotation struct {
 // +genclient:nonNamespaced
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:prerelease-lifecycle-gen:introduced=1.26
+// +kubebuilder:resource:scope=Cluster
 // +kubebuilder:metadata:annotations="api-approved.kubernetes.io=unapproved, request not yet submitted"
 // ValidatingAdmissionPolicyBinding binds the ValidatingAdmissionPolicy with paramerized resources.
 // ValidatingAdmissionPolicyBinding and parameter CRDs together define how cluster administrators configure policies for clusters.
@@ -367,6 +375,7 @@ type ValidatingAdmissionPolicyBindingSpec struct {
 	// PolicyName references a ValidatingAdmissionPolicy name which the ValidatingAdmissionPolicyBinding binds to.
 	// If the referenced resource does not exist, this binding is considered invalid and will be ignored
 	// Required.
+	// +kubebuilder:validation:Required
 	PolicyName string `json:"policyName,omitempty" protobuf:"bytes,1,rep,name=policyName"`
 
 	// ParamRef specifies the parameter resource used to configure the admission control policy.
@@ -422,6 +431,7 @@ type ValidatingAdmissionPolicyBindingSpec struct {
 	// API response body and the HTTP warning headers.
 	//
 	// Required.
+	// +kubebuilder:validation:Required
 	// +listType=set
 	ValidationActions []ValidationAction `json:"validationActions,omitempty" protobuf:"bytes,4,rep,name=validationActions"`
 }
