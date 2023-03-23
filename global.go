@@ -1,5 +1,6 @@
 //go:build !DEBUG
 
+//go:generate ./hack/update-codegen.sh
 package cel_polyfill
 
 import (
