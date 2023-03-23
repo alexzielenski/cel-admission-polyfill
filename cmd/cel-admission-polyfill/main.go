@@ -52,7 +52,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-type ClientInterface[T runtime.Object, TList runtime.Object, TApplyConfiguration any] interface {
+type ClientInterface[T runtime.Object, TList runtime.Object] interface {
 	Create(ctx context.Context, object T, opts metav1.CreateOptions) (T, error)
 	Update(ctx context.Context, object T, opts metav1.UpdateOptions) (T, error)
 	Delete(ctx context.Context, name string, opts metav1.DeleteOptions) error
@@ -64,24 +64,24 @@ type ClientInterface[T runtime.Object, TList runtime.Object, TApplyConfiguration
 }
 
 type ClientInterfaceWithApply[T runtime.Object, TList runtime.Object, TApplyConfiguration any] interface {
-	ClientInterface[T, TList, TApplyConfiguration]
+	ClientInterface[T, TList]
 	Apply(ctx context.Context, object TApplyConfiguration, opts metav1.ApplyOptions) (result T, err error)
 }
 
-type ClientInterfaceWithStatus[T runtime.Object, TList runtime.Object, TApplyConfiguration any] interface {
-	ClientInterface[T, TList, TApplyConfiguration]
+type ClientInterfaceWithStatus[T runtime.Object, TList runtime.Object] interface {
+	ClientInterface[T, TList]
 	UpdateStatus(ctx context.Context, object T, opts metav1.UpdateOptions) (T, error)
 }
 
 type ClientInterfaceWithStatusAndApply[T runtime.Object, TList runtime.Object, TApplyConfiguration any] interface {
-	ClientInterfaceWithStatus[T, TList, TApplyConfiguration]
+	ClientInterfaceWithStatus[T, TList]
 	ClientInterfaceWithApply[T, TList, TApplyConfiguration]
 	ApplyStatus(ctx context.Context, object TApplyConfiguration, opts metav1.ApplyOptions) (result T, err error)
 }
 
 type TransformedClient[T runtime.Object, TList runtime.Object, TApplyConfiguration any, R runtime.Object, RList runtime.Object, RApplyConfiguration any] struct {
-	TargetClient      ClientInterface[T, TList, TApplyConfiguration]
-	ReplacementClient ClientInterface[R, RList, RApplyConfiguration]
+	TargetClient      ClientInterface[T, TList]
+	ReplacementClient ClientInterface[R, RList]
 
 	To   func(R) (T, error)
 	From func(T) (R, error)
@@ -135,7 +135,7 @@ func (c TransformedClient[T, TList, TApplyConfiguration, R, RList, RApplyConfigu
 		return nilT, err
 	}
 
-	replacementValue, err := c.ReplacementClient.(ClientInterfaceWithStatus[R, RList, RApplyConfiguration]).UpdateStatus(ctx, converted, opts)
+	replacementValue, err := c.ReplacementClient.(ClientInterfaceWithStatus[R, RList]).UpdateStatus(ctx, converted, opts)
 	if err != nil {
 		return nilT, err
 	}
@@ -215,6 +215,9 @@ func (c TransformedClient[T, TList, TApplyConfiguration, R, RList, RApplyConfigu
 	}), nil
 }
 
+// Ideally your replacement type is JSON compatible with your target type
+// in case of validatingadmissionpolicy polyfill that is true.
+// If we ever need this we can do something about it
 func (c TransformedClient[T, TList, TApplyConfiguration, R, RList, RApplyConfiguration]) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result T, err error) {
 	panic("transform patch unsupported")
 }
