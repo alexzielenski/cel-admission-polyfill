@@ -3,8 +3,10 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/admission/plugin/validatingadmissionpolicy"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
@@ -17,6 +19,7 @@ import (
 type ValidationInterface interface {
 	admission.ValidationInterface
 	Run(context.Context) error
+	HasSynced() bool
 }
 
 type celAdmissionPlugin struct {
@@ -50,6 +53,17 @@ func NewPlugin(
 	}
 }
 
+func (c *celAdmissionPlugin) HasSynced() bool {
+	// l, e := c.client.AdmissionregistrationV1alpha1().ValidatingAdmissionPolicies().List(context.TODO(), v1.ListOptions{})
+	// l2, e2 := c.client.AdmissionregistrationV1alpha1().ValidatingAdmissionPolicyBindings().List(context.TODO(), v1.ListOptions{})
+	// // workaround informer bug where if there are no items in initial list HasSynced
+	// // never returns true :(
+	// if (e == nil && len(l.Items) == 0) || (e2 == nil && len(l2.Items) == 0) {
+	// 	return true
+	// }
+	return c.evaluator.HasSynced()
+}
+
 func (c *celAdmissionPlugin) Run(ctx context.Context) error {
 	c.evaluator.Run(ctx.Done())
 	return nil
@@ -70,7 +84,9 @@ func (c *celAdmissionPlugin) Validate(
 		return
 	}
 
-	if !c.evaluator.HasSynced() {
+	if err := wait.PollImmediateWithContext(ctx, 100*time.Millisecond, 1*time.Second, func(ctx context.Context) (done bool, err error) {
+		return c.HasSynced(), nil
+	}); err != nil {
 		return admission.NewForbidden(a, fmt.Errorf("not yet ready to handle request"))
 	}
 

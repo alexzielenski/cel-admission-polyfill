@@ -1,6 +1,6 @@
 module github.com/alexzielenski/cel_polyfill
 
-go 1.18
+go 1.20
 
 require (
 	github.com/google/cel-go v0.12.6

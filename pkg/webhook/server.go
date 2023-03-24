@@ -17,6 +17,7 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -78,7 +79,9 @@ type Interface interface {
 
 func New(port int, certs CertInfo, scheme *runtime.Scheme, validator admission.ValidationInterface) Interface {
 	codecs := serializer.NewCodecFactory(scheme)
-
+	if port < 0 {
+		port = 0
+	}
 	return &webhook{
 		CertInfo:         certs,
 		objectInferfaces: admission.NewObjectInterfacesFromScheme(scheme),
@@ -263,8 +266,7 @@ func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Reques
 		logger.Error(err, "review response", "uid", parsed.Request.UID, "status", status)
 	}
 
-	allowed := true
-	errString := "valid"
+	err = nil
 
 	if wh.validator.Handles(admission.Operation(parsed.Request.Operation)) {
 		var object runtime.Object
@@ -361,22 +363,12 @@ func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Reques
 				Extra:  convertExtra(parsed.Request.UserInfo.Extra),
 			})
 
-		verr := wh.validator.Validate(context.TODO(), attrs, wh.objectInferfaces)
-		allowed = verr == nil
-		if verr != nil {
-			errString = verr.Error()
-		}
+		err = wh.validator.Validate(context.TODO(), attrs, wh.objectInferfaces)
 	}
 
-	var status int32 = http.StatusAccepted
-	if !allowed {
-		status = http.StatusForbidden
-	}
 	response := reviewResponse(
 		parsed.Request.UID,
-		allowed,
-		status,
-		errString,
+		err,
 	)
 
 	out, err := json.Marshal(response)
@@ -396,9 +388,11 @@ func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Reques
 		"name",
 		parsed.Request.Name,
 		"allowed",
-		allowed,
+		response.Response.Allowed,
 		"msg",
-		errString,
+		response.Response.Result.Message,
+		"reason",
+		response.Response.Result.Reason,
 		"uid",
 		parsed.Request.UID,
 	)
@@ -409,8 +403,25 @@ func (wh *webhook) handleWebhookMutate(w http.ResponseWriter, req *http.Request)
 	w.WriteHeader(500)
 }
 
-func reviewResponse(uid types.UID, allowed bool, httpCode int32,
-	reason string) *admissionv1.AdmissionReview {
+func reviewResponse(uid types.UID, err error) *admissionv1.AdmissionReview {
+	allowed := err == nil
+	var status int32 = http.StatusAccepted
+	if err != nil {
+		status = http.StatusForbidden
+	}
+	reason := metav1.StatusReasonUnknown
+	message := "valid"
+	if err != nil {
+		message = err.Error()
+	}
+
+	var statusErr *k8serrors.StatusError
+	if ok := errors.As(err, &statusErr); ok {
+		reason = statusErr.ErrStatus.Reason
+		message = statusErr.ErrStatus.Message
+		status = statusErr.ErrStatus.Code
+	}
+
 	return &admissionv1.AdmissionReview{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "AdmissionReview",
@@ -420,8 +431,9 @@ func reviewResponse(uid types.UID, allowed bool, httpCode int32,
 			UID:     uid,
 			Allowed: allowed,
 			Result: &metav1.Status{
-				Code:    httpCode,
-				Message: reason,
+				Code:    status,
+				Message: message,
+				Reason:  reason,
 			},
 		},
 	}

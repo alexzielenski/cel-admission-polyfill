@@ -80,12 +80,12 @@ func GenerateLocalCertificates() (CertInfo, error) {
 	if err != nil {
 		return CertInfo{}, fmt.Errorf("failed to generate ca random serial: %w", err)
 	}
-	var buf bytes.Buffer
+	buf := bytes.Buffer{}
 	if err := pem.Encode(&buf, &pem.Block{Type: "CERTIFICATE", Bytes: caDer}); err != nil {
 		return CertInfo{}, fmt.Errorf("failed to encode ca pem: %w", err)
 	}
 	caPEM := buf.Bytes()
-	buf.Reset()
+	buf = bytes.Buffer{}
 
 	if err := pem.Encode(&buf, &pem.Block{Type: "CERTIFICATE", Bytes: serverDer}); err != nil {
 		return CertInfo{}, fmt.Errorf("failed to encode server pem: %w", err)
@@ -106,17 +106,31 @@ func GenerateLocalCertificates() (CertInfo, error) {
 	if err != nil {
 		return CertInfo{}, fmt.Errorf("failed to marshal server private key %v", err)
 	}
+
+	buf = bytes.Buffer{}
 	if err := pem.Encode(&buf, &pem.Block{Type: "EC PRIVATE KEY", Bytes: serverEC}); err != nil {
 		return CertInfo{}, fmt.Errorf("failed to encode server pem: %w", err)
 	}
 	serverKeyPEM := buf.Bytes()
 
+	if caPEM[len(caPEM)-1] != '\n' {
+		caPEM = append(caPEM, '\n')
+	}
+	if serverKeyPEM[len(serverKeyPEM)-1] != '\n' {
+		serverKeyPEM = append(serverKeyPEM, '\n')
+	}
+	if serverPEM[len(serverPEM)-1] != '\n' {
+		serverPEM = append(serverPEM, '\n')
+	}
+
 	// Verify that the certificate is signed by the CA.
-	caCert, err := x509.ParseCertificate(caDer)
+	certBlock, _ := pem.Decode(caPEM)
+	caCert, err := x509.ParseCertificate(certBlock.Bytes)
 	if err != nil {
 		panic(err)
 	}
-	cert, err := x509.ParseCertificate(serverDer)
+	certBlock, _ = pem.Decode(serverPEM)
+	cert, err := x509.ParseCertificate(certBlock.Bytes)
 	if err != nil {
 		panic(err)
 	}
