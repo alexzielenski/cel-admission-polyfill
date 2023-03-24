@@ -16,6 +16,6 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-func DEBUG_InstallCRDs(ctx context.Context, client dynamic.Interface) {
+func DEBUG_InstallCRDs(ctx context.Context, client apiextensionsclientset.Interface) {
 	// Do nothing on production
 }

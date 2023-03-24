@@ -3,11 +3,16 @@ package webhook
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"strconv"
+	"sync"
 
 	admissionv1 "k8s.io/api/admission/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
@@ -27,10 +32,35 @@ import (
 
 var logger klog.Logger = klog.LoggerWithName(klog.Background(), "webhook")
 
+// PEM encoded certs and keys for webhook
 type CertInfo struct {
-	CertFile string
-	KeyFile  string
-	RootFile string
+	Cert []byte
+	Key  []byte
+	Root []byte
+}
+
+func NewCertInfoFromFiles(certFile, keyFile, rootFile string) (CertInfo, error) {
+	rootCert, err := ioutil.ReadFile(rootFile)
+
+	if err != nil {
+		return CertInfo{}, fmt.Errorf("loading CA bundle %s: %w", rootFile, err)
+	}
+
+	keyData, err := ioutil.ReadFile(keyFile)
+	if err != nil {
+		return CertInfo{}, fmt.Errorf("loading key %s: %w", keyFile, err)
+	}
+
+	certData, err := ioutil.ReadFile(certFile)
+	if err != nil {
+		return CertInfo{}, fmt.Errorf("loading cert %s: %w", certFile, err)
+	}
+
+	return CertInfo{
+		Cert: certData,
+		Key:  keyData,
+		Root: rootCert,
+	}, nil
 }
 
 type Interface interface {
@@ -46,19 +76,22 @@ type Interface interface {
 	Run(ctx context.Context) error
 }
 
-func New(certs CertInfo, scheme *runtime.Scheme, validator admission.ValidationInterface) Interface {
+func New(port int, certs CertInfo, scheme *runtime.Scheme, validator admission.ValidationInterface) Interface {
 	codecs := serializer.NewCodecFactory(scheme)
+
 	return &webhook{
 		CertInfo:         certs,
 		objectInferfaces: admission.NewObjectInterfacesFromScheme(scheme),
 		decoder:          codecs.UniversalDeserializer(),
-		port:             9091,
+		port:             port,
 		validator:        validator,
 	}
 }
 
 type webhook struct {
-	port             uint16
+	lock             sync.Mutex
+	port             int
+	serverPort       int
 	validator        admission.ValidationInterface
 	objectInferfaces admission.ObjectInterfaces
 	decoder          runtime.Decoder
@@ -66,13 +99,15 @@ type webhook struct {
 }
 
 func (wh *webhook) Install(client kubernetes.Interface) error {
-	rootCert, err := ioutil.ReadFile(wh.RootFile)
+	wh.lock.Lock()
+	defer wh.lock.Unlock()
 
-	if err != nil {
-		return fmt.Errorf("loading CA bundle: %w", err)
+	port := wh.serverPort
+	if port == 0 {
+		return errors.New("server is not running")
 	}
 
-	_, err = client.
+	_, err := client.
 		AdmissionregistrationV1().
 		ValidatingWebhookConfigurations().
 		Apply(
@@ -94,8 +129,8 @@ func (wh *webhook) Install(client kubernetes.Interface) error {
 							//TODO: When in cluster install a service too
 							// and use a service for this
 							admissionregistrationv1apply.WebhookClientConfig().
-								WithURL("https://127.0.0.1:"+strconv.Itoa(int(wh.port))+"/validate").
-								WithCABundle(rootCert...)).
+								WithURL("https://127.0.0.1:"+strconv.Itoa(int(port))+"/validate").
+								WithCABundle(wh.Root...)).
 						WithSideEffects(
 							admissionregistrationv1.SideEffectClassNone).
 						//!TODO: gate for debugging
@@ -112,12 +147,48 @@ func (wh *webhook) Install(client kubernetes.Interface) error {
 	return nil
 }
 
+func (wh *webhook) createListener() (net.Listener, int, error) {
+	wh.lock.Lock()
+	defer wh.lock.Unlock()
+	if wh.serverPort != 0 {
+		return nil, 0, errors.New("server is already running")
+	}
+
+	listener, err := net.Listen("tcp", ":"+strconv.Itoa(wh.port))
+	if err != nil {
+		return nil, 0, err
+	}
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	wh.serverPort = port
+	return listener, wh.serverPort, nil
+}
+
 func (wh *webhook) Run(ctx context.Context) error {
-	fmt.Printf("starting webhook HTTP server on port %v\n", wh.port)
-	defer fmt.Println("webhook server has stopped")
+	// Create a new certificate from the loaded certificate and key.
+	serverCert, err := tls.X509KeyPair(wh.Cert, wh.Key)
+	if err != nil {
+		return err
+	}
+
+	// Create a new CertPool and add the CA certificate to it.
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(wh.Root)
+
+	listener, port, err := wh.createListener()
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		wh.lock.Lock()
+		defer wh.lock.Unlock()
+		wh.serverPort = 0
+	}()
 
 	fork, cancel := context.WithCancel(ctx)
 
+	// Start server
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", wh.handleHealth)
 	mux.HandleFunc("/validate", wh.handleWebhookValidate)
@@ -125,16 +196,21 @@ func (wh *webhook) Run(ctx context.Context) error {
 
 	srv := http.Server{}
 	srv.Handler = mux
-	srv.Addr = ":" + strconv.Itoa(int(wh.port))
-
+	srv.Addr = ":" + strconv.Itoa(port)
+	srv.TLSConfig = &tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+		ClientAuth:   tls.NoClientCert,
+	}
 	var serverError error
 
 	go func() {
-		serverError = srv.ListenAndServeTLS(wh.CertFile, wh.KeyFile)
+		serverError = srv.ServeTLS(listener, "", "")
 		// ListenAndServeTLS always returns non-nil error
 		cancel()
 	}()
 
+	logger.Info("started webhook HTTP server", "port", port)
+	defer logger.Info("webhook server has stopped")
 	<-fork.Done()
 
 	// If the caller closed their context, rather than the server having errored,
@@ -149,7 +225,7 @@ func (wh *webhook) Run(ctx context.Context) error {
 	}
 
 	// Prefer the passed context's error to pick up deadline/cancelled errors
-	err := ctx.Err()
+	err = fork.Err()
 	if err == nil {
 		// If the fork was closed, but the passed in context was not
 		// expired/cancelled, then the server experienced an error independently

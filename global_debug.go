@@ -6,10 +6,7 @@ import (
 	"context"
 	_ "embed"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/dynamic"
+	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/klog/v2"
 )
 
@@ -25,73 +22,76 @@ var policyCRD string
 //go:embed crds/admissionregistration.polyfill.sigs.k8s.io_validatingadmissionpolicybindings.yaml
 var policyBindingCRD string
 
-func DEBUG_InstallCRDs(ctx context.Context, client dynamic.Interface) {
+func DEBUG_InstallCRDs(ctx context.Context, client apiextensionsclientset.Interface) {
 	klog.Info("installing CRDs")
-	_, err := client.Resource(schema.GroupVersionResource{
-		Group:    "apiextensions.k8s.io",
-		Version:  "v1",
-		Resource: "customresourcedefinitions",
-	}).
-		Patch(
-			ctx,
-			"validationrulesets.celadmissionpolyfill.k8s.io",
-			types.ApplyPatchType,
-			[]byte(validationRuleSetsCRD),
-			metav1.PatchOptions{FieldManager: "cel-polyfill-controller"},
-		)
-
-	if err != nil {
+	if err := InstallCRDs(ctx, client); err != nil {
 		panic(err)
 	}
+	// _, err := client.Resource(schema.GroupVersionResource{
+	// 	Group:    "apiextensions.k8s.io",
+	// 	Version:  "v1",
+	// 	Resource: "customresourcedefinitions",
+	// }).
+	// 	Patch(
+	// 		ctx,
+	// 		"validationrulesets.celadmissionpolyfill.k8s.io",
+	// 		types.ApplyPatchType,
+	// 		[]byte(validationRuleSetsCRD),
+	// 		metav1.PatchOptions{FieldManager: "cel-polyfill-controller"},
+	// 	)
 
-	_, err = client.Resource(schema.GroupVersionResource{
-		Group:    "apiextensions.k8s.io",
-		Version:  "v1",
-		Resource: "customresourcedefinitions",
-	}).
-		Patch(
-			ctx,
-			"policytemplates.celadmissionpolyfill.k8s.io",
-			types.ApplyPatchType,
-			[]byte(policyTempaltesCRD),
-			metav1.PatchOptions{FieldManager: "cel-polyfill-controller"},
-		)
+	// if err != nil {
+	// 	panic(err)
+	// }
 
-	if err != nil {
-		panic(err)
-	}
+	// _, err = client.Resource(schema.GroupVersionResource{
+	// 	Group:    "apiextensions.k8s.io",
+	// 	Version:  "v1",
+	// 	Resource: "customresourcedefinitions",
+	// }).
+	// 	Patch(
+	// 		ctx,
+	// 		"policytemplates.celadmissionpolyfill.k8s.io",
+	// 		types.ApplyPatchType,
+	// 		[]byte(policyTempaltesCRD),
+	// 		metav1.PatchOptions{FieldManager: "cel-polyfill-controller"},
+	// 	)
 
-	_, err = client.Resource(schema.GroupVersionResource{
-		Group:    "apiextensions.k8s.io",
-		Version:  "v1",
-		Resource: "customresourcedefinitions",
-	}).
-		Patch(
-			ctx,
-			"validatingadmissionpolicies.admissionregistration.polyfill.sigs.k8s.io",
-			types.ApplyPatchType,
-			[]byte(policyCRD),
-			metav1.PatchOptions{FieldManager: "cel-polyfill-controller"},
-		)
+	// if err != nil {
+	// 	panic(err)
+	// }
 
-	if err != nil {
-		panic(err)
-	}
+	// _, err = client.Resource(schema.GroupVersionResource{
+	// 	Group:    "apiextensions.k8s.io",
+	// 	Version:  "v1",
+	// 	Resource: "customresourcedefinitions",
+	// }).
+	// 	Patch(
+	// 		ctx,
+	// 		"validatingadmissionpolicies.admissionregistration.polyfill.sigs.k8s.io",
+	// 		types.ApplyPatchType,
+	// 		[]byte(policyCRD),
+	// 		metav1.PatchOptions{FieldManager: "cel-polyfill-controller"},
+	// 	)
 
-	_, err = client.Resource(schema.GroupVersionResource{
-		Group:    "apiextensions.k8s.io",
-		Version:  "v1",
-		Resource: "customresourcedefinitions",
-	}).
-		Patch(
-			ctx,
-			"validatingadmissionpolicybindings.admissionregistration.polyfill.sigs.k8s.io",
-			types.ApplyPatchType,
-			[]byte(policyBindingCRD),
-			metav1.PatchOptions{FieldManager: "cel-polyfill-controller"},
-		)
+	// if err != nil {
+	// 	panic(err)
+	// }
 
-	if err != nil {
-		panic(err)
-	}
+	// _, err = client.Resource(schema.GroupVersionResource{
+	// 	Group:    "apiextensions.k8s.io",
+	// 	Version:  "v1",
+	// 	Resource: "customresourcedefinitions",
+	// }).
+	// 	Patch(
+	// 		ctx,
+	// 		"validatingadmissionpolicybindings.admissionregistration.polyfill.sigs.k8s.io",
+	// 		types.ApplyPatchType,
+	// 		[]byte(policyBindingCRD),
+	// 		metav1.PatchOptions{FieldManager: "cel-polyfill-controller"},
+	// 	)
+
+	// if err != nil {
+	// 	panic(err)
+	// }
 }
