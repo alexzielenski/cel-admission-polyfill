@@ -4,8 +4,5 @@ metadata:
   name: k8s-policy-binding
 spec:
   policyName: k8s-policy
-  paramRef:
-    name: binding-config
-    namespace: default
   validationActions:
   - Deny

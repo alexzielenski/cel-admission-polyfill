@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 // COPIED FROMK8S SOURCE
-// Modified to include kuberbuilder status tags, cluster scoping, api-approved annotation, required fields
+// Modified to include kuberbuilder status tags, cluster scoping, api-approved  annotation, required fields, defaults.
 
 package v1alpha1
 
@@ -177,6 +177,7 @@ type ValidatingAdmissionPolicySpec struct {
 	//
 	// Allowed values are Ignore or Fail. Defaults to Fail.
 	// +optional
+	// +kubebuilder:default=Fail
 	FailurePolicy *FailurePolicyType `json:"failurePolicy,omitempty" protobuf:"bytes,4,opt,name=failurePolicy,casttype=FailurePolicyType"`
 
 	// auditAnnotations contains CEL expressions which are used to produce audit
@@ -343,6 +344,7 @@ type AuditAnnotation struct {
 // +genclient:nonNamespaced
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:prerelease-lifecycle-gen:introduced=1.26
+// +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster
 // +kubebuilder:metadata:annotations="api-approved.kubernetes.io=unapproved, request not yet submitted"
 // ValidatingAdmissionPolicyBinding binds the ValidatingAdmissionPolicy with paramerized resources.
@@ -496,6 +498,7 @@ type MatchResources struct {
 	//
 	// Default to the empty LabelSelector, which matches everything.
 	// +optional
+	// +kubebuilder:default={}
 	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty" protobuf:"bytes,1,opt,name=namespaceSelector"`
 	// ObjectSelector decides whether to run the validation based on if the
 	// object has matching labels. objectSelector is evaluated against both
@@ -509,6 +512,7 @@ type MatchResources struct {
 	// users may skip the admission webhook by setting the labels.
 	// Default to the empty LabelSelector, which matches everything.
 	// +optional
+	// +kubebuilder:default={}
 	ObjectSelector *metav1.LabelSelector `json:"objectSelector,omitempty" protobuf:"bytes,2,opt,name=objectSelector"`
 	// ResourceRules describes what operations on what resources/subresources the ValidatingAdmissionPolicy matches.
 	// The policy cares about an operation if it matches _any_ Rule.
@@ -535,6 +539,7 @@ type MatchResources struct {
 	//
 	// Defaults to "Equivalent"
 	// +optional
+	// +kubebuilder:default=Equivalent
 	MatchPolicy *MatchPolicyType `json:"matchPolicy,omitempty" protobuf:"bytes,7,opt,name=matchPolicy,casttype=MatchPolicyType"`
 }
 
