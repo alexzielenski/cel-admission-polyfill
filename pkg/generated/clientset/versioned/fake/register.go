@@ -19,14 +19,12 @@ limitations under the License.
 package fake
 
 import (
-	admissionregistrationv1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/apis/admissionregistration.polyfill.sigs.k8s.io/v1alpha1"
-	celadmissionpolyfillv0alpha1 "github.com/alexzielenski/cel_polyfill/pkg/apis/celadmissionpolyfill.k8s.io/v0alpha1"
-	celadmissionpolyfillv0alpha2 "github.com/alexzielenski/cel_polyfill/pkg/apis/celadmissionpolyfill.k8s.io/v0alpha2"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	serializer "k8s.io/apimachinery/pkg/runtime/serializer"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	admissionregistrationv1alpha1 "k8s.io/cel-admission-webhook/pkg/apis/admissionregistration.x-k8s.io/v1alpha1"
 )
 
 var scheme = runtime.NewScheme()
@@ -34,8 +32,6 @@ var codecs = serializer.NewCodecFactory(scheme)
 
 var localSchemeBuilder = runtime.SchemeBuilder{
 	admissionregistrationv1alpha1.AddToScheme,
-	celadmissionpolyfillv0alpha1.AddToScheme,
-	celadmissionpolyfillv0alpha2.AddToScheme,
 }
 
 // AddToScheme adds all types of this clientset into the given scheme. This allows composition

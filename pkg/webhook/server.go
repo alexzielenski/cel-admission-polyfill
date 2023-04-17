@@ -3,19 +3,13 @@ package webhook
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
-	"net"
 	"net/http"
-	"strconv"
 	"sync"
 
 	admissionv1 "k8s.io/api/admission/v1"
-	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,46 +20,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/authentication/user"
-	admissionregistrationv1apply "k8s.io/client-go/applyconfigurations/admissionregistration/v1"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 )
 
 var logger klog.Logger = klog.LoggerWithName(klog.Background(), "webhook")
 
-// PEM encoded certs and keys for webhook
-type CertInfo struct {
-	Cert []byte
-	Key  []byte
-	Root []byte
-}
-
-func NewCertInfoFromFiles(certFile, keyFile, rootFile string) (CertInfo, error) {
-	rootCert, err := ioutil.ReadFile(rootFile)
-
-	if err != nil {
-		return CertInfo{}, fmt.Errorf("loading CA bundle %s: %w", rootFile, err)
-	}
-
-	keyData, err := ioutil.ReadFile(keyFile)
-	if err != nil {
-		return CertInfo{}, fmt.Errorf("loading key %s: %w", keyFile, err)
-	}
-
-	certData, err := ioutil.ReadFile(certFile)
-	if err != nil {
-		return CertInfo{}, fmt.Errorf("loading cert %s: %w", certFile, err)
-	}
-
-	return CertInfo{
-		Cert: certData,
-		Key:  keyData,
-		Root: rootCert,
-	}, nil
-}
-
 type Interface interface {
-	Install(client kubernetes.Interface) error
 
 	// Runs the webhook server until the passed context is cancelled, or it
 	// experiences an internal error.
@@ -77,142 +37,49 @@ type Interface interface {
 	Run(ctx context.Context) error
 }
 
-func New(port int, certs CertInfo, scheme *runtime.Scheme, validator admission.ValidationInterface) Interface {
+func New(addr string, certFile, keyFile string, scheme *runtime.Scheme, validator admission.ValidationInterface) Interface {
 	codecs := serializer.NewCodecFactory(scheme)
-	if port < 0 {
-		port = 0
-	}
 	return &webhook{
-		CertInfo:         certs,
 		objectInferfaces: admission.NewObjectInterfacesFromScheme(scheme),
 		decoder:          codecs.UniversalDeserializer(),
-		port:             port,
 		validator:        validator,
+		addr:             addr,
+		certFile:         certFile,
+		keyFile:          keyFile,
 	}
 }
 
 type webhook struct {
-	lock             sync.Mutex
-	port             int
-	serverPort       int
-	validator        admission.ValidationInterface
-	objectInferfaces admission.ObjectInterfaces
-	decoder          runtime.Decoder
-	CertInfo
-}
-
-func (wh *webhook) Install(client kubernetes.Interface) error {
-	wh.lock.Lock()
-	defer wh.lock.Unlock()
-
-	port := wh.serverPort
-	if port == 0 {
-		return errors.New("server is not running")
-	}
-
-	_, err := client.
-		AdmissionregistrationV1().
-		ValidatingWebhookConfigurations().
-		Apply(
-			context.TODO(),
-			admissionregistrationv1apply.ValidatingWebhookConfiguration("cel-admission-polyfill.k8s.io").
-				WithWebhooks(
-					admissionregistrationv1apply.ValidatingWebhook().
-						WithName("cel-admission-polyfill.k8s.io").
-						WithRules(
-							admissionregistrationv1apply.RuleWithOperations().
-								WithScope("*").
-								WithAPIGroups("*").
-								WithAPIVersions("*").
-								WithOperations("*").
-								WithResources("*"),
-						).
-						WithAdmissionReviewVersions("v1").
-						WithClientConfig(
-							//TODO: When in cluster install a service too
-							// and use a service for this
-							admissionregistrationv1apply.WebhookClientConfig().
-								WithURL("https://127.0.0.1:"+strconv.Itoa(int(port))+"/validate").
-								WithCABundle(wh.Root...)).
-						WithSideEffects(
-							admissionregistrationv1.SideEffectClassNone).
-						//!TODO: gate for debugging
-						WithFailurePolicy(admissionregistrationv1.Ignore),
-				),
-			metav1.ApplyOptions{
-				FieldManager: "cel_polyfill_debug",
-			},
-		)
-
-	if err != nil {
-		return fmt.Errorf("updating webhook configuration: %w", err)
-	}
-	return nil
-}
-
-func (wh *webhook) createListener() (net.Listener, int, error) {
-	wh.lock.Lock()
-	defer wh.lock.Unlock()
-	if wh.serverPort != 0 {
-		return nil, 0, errors.New("server is already running")
-	}
-
-	listener, err := net.Listen("tcp", ":"+strconv.Itoa(wh.port))
-	if err != nil {
-		return nil, 0, err
-	}
-
-	port := listener.Addr().(*net.TCPAddr).Port
-	wh.serverPort = port
-	return listener, wh.serverPort, nil
+	lock              sync.Mutex
+	port              int
+	validator         admission.ValidationInterface
+	objectInferfaces  admission.ObjectInterfaces
+	decoder           runtime.Decoder
+	addr              string
+	certFile, keyFile string
 }
 
 func (wh *webhook) Run(ctx context.Context) error {
-	// Create a new certificate from the loaded certificate and key.
-	serverCert, err := tls.X509KeyPair(wh.Cert, wh.Key)
-	if err != nil {
-		return err
-	}
-
-	// Create a new CertPool and add the CA certificate to it.
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(wh.Root)
-
-	listener, port, err := wh.createListener()
-	if err != nil {
-		return err
-	}
-
-	defer func() {
-		wh.lock.Lock()
-		defer wh.lock.Unlock()
-		wh.serverPort = 0
-	}()
-
 	fork, cancel := context.WithCancel(ctx)
 
 	// Start server
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", wh.handleHealth)
 	mux.HandleFunc("/validate", wh.handleWebhookValidate)
-	mux.HandleFunc("/mutate", wh.handleWebhookMutate)
 
 	srv := http.Server{}
 	srv.Handler = mux
-	srv.Addr = ":" + strconv.Itoa(port)
-	srv.TLSConfig = &tls.Config{
-		Certificates: []tls.Certificate{serverCert},
-		ClientAuth:   tls.NoClientCert,
-	}
+	srv.Addr = wh.addr
+
 	var serverError error
 
 	go func() {
-		serverError = srv.ServeTLS(listener, "", "")
+		serverError = srv.ListenAndServeTLS(wh.certFile, wh.keyFile)
 		// ListenAndServeTLS always returns non-nil error
 		cancel()
 	}()
 
-	logger.Info("started webhook HTTP server", "port", port)
+	logger.Info("started webhook HTTP server")
 	defer logger.Info("webhook server has stopped")
 	<-fork.Done()
 
@@ -228,7 +95,7 @@ func (wh *webhook) Run(ctx context.Context) error {
 	}
 
 	// Prefer the passed context's error to pick up deadline/cancelled errors
-	err = fork.Err()
+	err := fork.Err()
 	if err == nil {
 		// If the fork was closed, but the passed in context was not
 		// expired/cancelled, then the server experienced an error independently
@@ -244,8 +111,7 @@ func (wh *webhook) handleHealth(w http.ResponseWriter, req *http.Request) {
 func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Request) {
 	parsed, err := parseRequest(req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		logger.Error(err, "parsing admission review request")
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -396,11 +262,6 @@ func (wh *webhook) handleWebhookValidate(w http.ResponseWriter, req *http.Reques
 		"uid",
 		parsed.Request.UID,
 	)
-}
-
-func (wh *webhook) handleWebhookMutate(w http.ResponseWriter, req *http.Request) {
-	fmt.Println("mutate hit")
-	w.WriteHeader(500)
 }
 
 func reviewResponse(uid types.UID, err error) *admissionv1.AdmissionReview {

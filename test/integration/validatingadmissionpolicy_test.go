@@ -27,17 +27,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alexzielenski/cel_polyfill"
-	"github.com/alexzielenski/cel_polyfill/pkg/controller/admissionregistration.polyfill.sigs.k8s.io/v1alpha1"
-	crdv1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/controller/admissionregistration.polyfill.sigs.k8s.io/v1alpha1"
-	"github.com/alexzielenski/cel_polyfill/pkg/controller/schemaresolver"
-	"github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned"
-	"github.com/alexzielenski/cel_polyfill/pkg/webhook"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apiextensionsinformers "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
 	"k8s.io/apiextensions-apiserver/test/integration/fixtures"
 	"k8s.io/apiserver/pkg/admission"
+	"k8s.io/cel-admission-webhook/pkg/controller/admissionregistration.x-k8s.io/v1alpha1"
+	crdv1alpha1 "k8s.io/cel-admission-webhook/pkg/controller/admissionregistration.x-k8s.io/v1alpha1"
+	"k8s.io/cel-admission-webhook/pkg/controller/schemaresolver"
+	"k8s.io/cel-admission-webhook/pkg/generated/clientset/versioned"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -45,6 +43,8 @@ import (
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
 
+	v1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -52,10 +52,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
-	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
-
-	v1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	admissionregistrationv1alpha1 "k8s.io/api/admissionregistration/v1alpha1"
@@ -85,7 +81,6 @@ func (tc testClient) Discovery() discovery.DiscoveryInterface {
 	return tc.KI.Discovery()
 }
 
-var webhookServer webhook.Interface
 var webhookValidator *swapValidator = &swapValidator{}
 
 type swapValidator struct {
@@ -173,46 +168,6 @@ func serverScope(transformConfig func(*rest.Config)) (testClientInterface, func(
 	}).(meta.ResettableRESTMapper)
 
 	plugin := v1alpha1.NewPlugin(factory, client, restmapper, schemaresolver.New(apiextensionsFactory.Apiextensions().V1().CustomResourceDefinitions(), client.Discovery()), client, nil)
-	if webhookServer == nil {
-		if err := resetcluster(client); err != nil {
-			panic(err)
-		}
-
-		if err := cel_polyfill.InstallCRDs(ctx, client); err != nil {
-			panic(err)
-		}
-
-		certs, err := webhook.GenerateLocalCertificates()
-		if err != nil {
-			panic(err)
-		}
-
-		webhookServer = webhook.New(-1, certs, clientsetscheme.Scheme, webhookValidator)
-
-		go func() {
-			err := webhookServer.Run(context.Background())
-			if err != nil {
-				panic(err)
-			}
-		}()
-
-		err = wait.Poll(250*time.Millisecond, 10*time.Second, func() (done bool, err error) {
-			// When debugging, expect server to be running already. Treat
-			// as non-fatal error if it isn't.
-			// Install webhook configuration
-			if err := webhookServer.Install(client); err != nil {
-				fmt.Printf("failed to install webhook: %v\n", err.Error())
-				return false, nil
-			}
-
-			// klog.Info("successfully updated webhook configuration")
-			return true, nil
-		})
-		if err != nil {
-			panic(err)
-		}
-
-	}
 
 	webhookValidator.Set(plugin)
 	go plugin.Run(ctx)
@@ -384,7 +339,7 @@ func resetcluster(client testClientInterface) error {
 	}
 
 	for _, crd := range crdList.Items {
-		if strings.Contains(crd.Name, "admissionregistration.polyfill.sigs.k8s.io") {
+		if strings.Contains(crd.Name, "admissionregistration.x-k8s.io") {
 			continue
 		}
 

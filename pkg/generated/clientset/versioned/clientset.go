@@ -22,9 +22,7 @@ import (
 	"fmt"
 	"net/http"
 
-	admissionregistrationv1alpha1 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/admissionregistration.polyfill.sigs.k8s.io/v1alpha1"
-	celadmissionpolyfillv0alpha1 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v0alpha1"
-	celadmissionpolyfillv0alpha2 "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned/typed/celadmissionpolyfill.k8s.io/v0alpha2"
+	admissionregistrationv1alpha1 "k8s.io/cel-admission-webhook/pkg/generated/clientset/versioned/typed/admissionregistration.x-k8s.io/v1alpha1"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
 	flowcontrol "k8s.io/client-go/util/flowcontrol"
@@ -33,31 +31,17 @@ import (
 type Interface interface {
 	Discovery() discovery.DiscoveryInterface
 	AdmissionregistrationV1alpha1() admissionregistrationv1alpha1.AdmissionregistrationV1alpha1Interface
-	CeladmissionpolyfillV0alpha1() celadmissionpolyfillv0alpha1.CeladmissionpolyfillV0alpha1Interface
-	CeladmissionpolyfillV0alpha2() celadmissionpolyfillv0alpha2.CeladmissionpolyfillV0alpha2Interface
 }
 
 // Clientset contains the clients for groups.
 type Clientset struct {
 	*discovery.DiscoveryClient
 	admissionregistrationV1alpha1 *admissionregistrationv1alpha1.AdmissionregistrationV1alpha1Client
-	celadmissionpolyfillV0alpha1  *celadmissionpolyfillv0alpha1.CeladmissionpolyfillV0alpha1Client
-	celadmissionpolyfillV0alpha2  *celadmissionpolyfillv0alpha2.CeladmissionpolyfillV0alpha2Client
 }
 
 // AdmissionregistrationV1alpha1 retrieves the AdmissionregistrationV1alpha1Client
 func (c *Clientset) AdmissionregistrationV1alpha1() admissionregistrationv1alpha1.AdmissionregistrationV1alpha1Interface {
 	return c.admissionregistrationV1alpha1
-}
-
-// CeladmissionpolyfillV0alpha1 retrieves the CeladmissionpolyfillV0alpha1Client
-func (c *Clientset) CeladmissionpolyfillV0alpha1() celadmissionpolyfillv0alpha1.CeladmissionpolyfillV0alpha1Interface {
-	return c.celadmissionpolyfillV0alpha1
-}
-
-// CeladmissionpolyfillV0alpha2 retrieves the CeladmissionpolyfillV0alpha2Client
-func (c *Clientset) CeladmissionpolyfillV0alpha2() celadmissionpolyfillv0alpha2.CeladmissionpolyfillV0alpha2Interface {
-	return c.celadmissionpolyfillV0alpha2
 }
 
 // Discovery retrieves the DiscoveryClient
@@ -108,14 +92,6 @@ func NewForConfigAndClient(c *rest.Config, httpClient *http.Client) (*Clientset,
 	if err != nil {
 		return nil, err
 	}
-	cs.celadmissionpolyfillV0alpha1, err = celadmissionpolyfillv0alpha1.NewForConfigAndClient(&configShallowCopy, httpClient)
-	if err != nil {
-		return nil, err
-	}
-	cs.celadmissionpolyfillV0alpha2, err = celadmissionpolyfillv0alpha2.NewForConfigAndClient(&configShallowCopy, httpClient)
-	if err != nil {
-		return nil, err
-	}
 
 	cs.DiscoveryClient, err = discovery.NewDiscoveryClientForConfigAndClient(&configShallowCopy, httpClient)
 	if err != nil {
@@ -138,8 +114,6 @@ func NewForConfigOrDie(c *rest.Config) *Clientset {
 func New(c rest.Interface) *Clientset {
 	var cs Clientset
 	cs.admissionregistrationV1alpha1 = admissionregistrationv1alpha1.New(c)
-	cs.celadmissionpolyfillV0alpha1 = celadmissionpolyfillv0alpha1.New(c)
-	cs.celadmissionpolyfillV0alpha2 = celadmissionpolyfillv0alpha2.New(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClient(c)
 	return &cs
