@@ -51,11 +51,11 @@ webhooks:
     timeoutSeconds: 2
     namespaceSelector:
       matchExpressions:
-      - key: metadata.namespace
+      - key: kubernetes.io/metadata.name
         operator: NotIn
-        values: ["kube-system"]
+        values: ["kube-system","kube-node-lease","kube-public"]
     objectSelector:
       matchExpressions:
-      - key: metadata.labels.app
+      - key: app
         operator: NotIn
         values: ["cel-shim-webhook"]
