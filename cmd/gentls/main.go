@@ -25,7 +25,9 @@ import (
 const oneYear = time.Hour * 24 * 365
 
 func generateAndWriteCertificates(hostName string) error {
-	ca, err := pki.GenerateCA(&pki.CAConfig{})
+	ca, err := pki.GenerateCA(&pki.CAConfig{
+		CommonName: "SelfSigned",
+	})
 	if err != nil {
 		return err
 	}
