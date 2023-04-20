@@ -24,11 +24,7 @@ mkdir -p "${SCRIPT_ROOT}/_output/"{manifests,tls,bin}
 host=${1:-cel-shim-webhook.default.svc}
 SECRET_NAME="${SECRET_NAME:-cel-shim-webhook.tls.example.com}"
 
-GENTLS="${SCRIPT_ROOT}/_output/bin/gentls"
-if [ ! -f "$GENTLS" ]; then
-  go build -o "${GENTLS}" ./cmd/gentls
-fi
-
+GENTLS="go run ${SCRIPT_ROOT}/cmd/gentls"
 echo "generating TLS keypair for ${host}"
 (cd "${SCRIPT_ROOT}/_output/tls" && ${GENTLS} -host="${host}")
 CA_PEM=$(base64 -w0 < "${SCRIPT_ROOT}/_output/tls/ca.pem")
