@@ -1,9 +1,0 @@
-apiVersion: stable.example.com/v1
-kind: BasicUnion
-metadata:
-  name: notatest
-spec:
-  value: world
-  mode1: world
-  discriminator: mode1
-

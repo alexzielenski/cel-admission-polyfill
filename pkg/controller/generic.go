@@ -55,7 +55,7 @@ func New[T runtime.Object](
 		lister:     informer.Lister(),
 		informer:   informer.Informer(),
 		reconciler: reconciler,
-		queue:      workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), options.Name),
+		queue:      workqueue.NewRateLimitingQueueWithConfig(workqueue.DefaultControllerRateLimiter(), workqueue.RateLimitingQueueConfig{Name: options.Name}),
 	}
 }
 

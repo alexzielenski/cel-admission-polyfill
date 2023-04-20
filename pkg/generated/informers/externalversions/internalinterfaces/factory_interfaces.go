@@ -21,9 +21,9 @@ package internalinterfaces
 import (
 	time "time"
 
-	versioned "github.com/alexzielenski/cel_polyfill/pkg/generated/clientset/versioned"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
+	versioned "k8s.io/cel-admission-webhook/pkg/generated/clientset/versioned"
 	cache "k8s.io/client-go/tools/cache"
 )
 

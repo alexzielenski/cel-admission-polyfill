@@ -1,19 +1,19 @@
-apiVersion: admissionregistration.polyfill.sigs.k8s.io/v1alpha1
+apiVersion: admissionregistration.x-k8s.io/v1alpha1
 kind: ValidatingAdmissionPolicy
 metadata:
   name: k8s-policy
 spec:
   matchConstraints:
     namespaceSelector:
-      matchLabels: {}
+      matchLabels: { }
     objectSelector:
-      matchLabels: {}
+      matchLabels: { }
     resourceRules:
-    - resourceNames: []
-      operations: ["*"]
-      apiGroups: [""]
-      apiVersions: ["v1"]
-      resources: ["configmaps"]
+    - resourceNames: [ ]
+      operations: [ "*" ]
+      apiGroups: [ "" ]
+      apiVersions: [ "v1" ]
+      resources: [ "configmaps" ]
 
   paramKind:
     apiVersion: v1
