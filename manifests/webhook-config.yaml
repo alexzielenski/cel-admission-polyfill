@@ -49,3 +49,13 @@ webhooks:
     admissionReviewVersions: ["v1"]
     sideEffects: None
     timeoutSeconds: 2
+    namespaceSelector:
+      matchExpressions:
+      - key: metadata.namespace
+        operator: NotIn
+        values: ["kube-system"]
+    objectSelector:
+      matchExpressions:
+      - key: metadata.labels.app
+        operator: NotIn
+        values: ["cel-shim-webhook"]
